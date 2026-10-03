@@ -7,6 +7,111 @@ export interface GuardContext {
   maxOperations: number;
 }
 
+function matchesRegulatedAsset(
+  asset: unknown,
+  expectedCode: string,
+  expectedIssuer: string,
+): boolean {
+  if (!asset || typeof asset !== "object") return false;
+  const a = asset as {
+    isNative?(): boolean;
+    getCode?(): string;
+    getIssuer?(): string;
+    code?: string;
+    issuer?: string;
+  };
+  if (typeof a.isNative === "function" && a.isNative()) return false;
+  const code = typeof a.getCode === "function" ? a.getCode() : a.code;
+  const issuer = typeof a.getIssuer === "function" ? a.getIssuer() : a.issuer;
+  return code === expectedCode && issuer === expectedIssuer;
+}
+
+function isAuthorizeOp(op: OperationRecord, issuer: string, assetCode: string): string | null {
+  const opSource = op.source ?? "";
+  if (opSource !== issuer) return null;
+
+  if (op.type === "setTrustLineFlags") {
+    const flagOp = op as OperationRecord & {
+      trustor?: string;
+      asset?: unknown;
+      flags?: {
+        authorized?: boolean;
+        authorizedToMaintainLiabilities?: boolean;
+        clawbackEnabled?: boolean;
+      };
+    };
+    if (!matchesRegulatedAsset(flagOp.asset, assetCode, issuer)) return null;
+    if (
+      flagOp.flags?.authorized === true &&
+      !flagOp.flags?.authorizedToMaintainLiabilities &&
+      !flagOp.flags?.clawbackEnabled
+    ) {
+      return flagOp.trustor && flagOp.trustor !== issuer ? flagOp.trustor : null;
+    }
+    return null;
+  }
+
+  if (op.type === "allowTrust") {
+    const allowOp = op as OperationRecord & {
+      trustor?: string;
+      assetCode?: string;
+      authorize?: boolean | number;
+    };
+    if (
+      allowOp.assetCode === assetCode &&
+      (allowOp.authorize === true || allowOp.authorize === 1)
+    ) {
+      return allowOp.trustor && allowOp.trustor !== issuer ? allowOp.trustor : null;
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function isDeauthorizeOp(op: OperationRecord, issuer: string, assetCode: string): string | null {
+  const opSource = op.source ?? "";
+  if (opSource !== issuer) return null;
+
+  if (op.type === "setTrustLineFlags") {
+    const flagOp = op as OperationRecord & {
+      trustor?: string;
+      asset?: unknown;
+      flags?: {
+        authorized?: boolean;
+        authorizedToMaintainLiabilities?: boolean;
+        clawbackEnabled?: boolean;
+      };
+    };
+    if (!matchesRegulatedAsset(flagOp.asset, assetCode, issuer)) return null;
+    if (
+      flagOp.flags?.authorized === false &&
+      !flagOp.flags?.authorizedToMaintainLiabilities &&
+      !flagOp.flags?.clawbackEnabled
+    ) {
+      return flagOp.trustor && flagOp.trustor !== issuer ? flagOp.trustor : null;
+    }
+    return null;
+  }
+
+  if (op.type === "allowTrust") {
+    const allowOp = op as OperationRecord & {
+      trustor?: string;
+      assetCode?: string;
+      authorize?: boolean | number;
+    };
+    if (
+      allowOp.assetCode === assetCode &&
+      (allowOp.authorize === false || allowOp.authorize === 0)
+    ) {
+      return allowOp.trustor && allowOp.trustor !== issuer ? allowOp.trustor : null;
+    }
+    return null;
+  }
+
+  return null;
+}
+
 /**
  * Asserts that a transaction is completely safe for the issuer to sign.
  * Throws PortcullisError("UNSAFE_TO_SIGN", ...) if any invariant is violated.
@@ -43,100 +148,147 @@ export function assertSafeToSign(
     );
   }
 
-  // Collect all legitimate user account addresses that appear in payments or tx source
-  const userAccounts = new Set<string>();
-  userAccounts.add(tx.source);
+  const ops = tx.operations;
+  let index = 0;
 
-  for (const op of tx.operations) {
-    if (op.type === "payment") {
-      const paymentOp = op as OperationRecord & {
-        destination: string;
-        source?: string;
-      };
-      if (paymentOp.source) {
-        userAccounts.add(paymentOp.source);
+  // Phase 1: Leading block of issuer-sourced authorize operations
+  const authTrustors: string[] = [];
+  const seenAuthTrustors = new Set<string>();
+
+  while (index < ops.length) {
+    const op = ops[index];
+    if (!op) break;
+    const opSource = op.source ?? tx.source;
+    if (opSource === ctx.issuer) {
+      const trustor = isAuthorizeOp(op, ctx.issuer, ctx.assetCode);
+      if (!trustor) {
+        throw new PortcullisError(
+          "UNSAFE_TO_SIGN",
+          `Issuer operation at index ${index} is not a valid authorize operation for ${ctx.assetCode}`,
+        );
       }
-      userAccounts.add(paymentOp.destination);
+      if (seenAuthTrustors.has(trustor)) {
+        throw new PortcullisError(
+          "UNSAFE_TO_SIGN",
+          `Duplicate authorize operation for trustor: ${trustor}`,
+        );
+      }
+      seenAuthTrustors.add(trustor);
+      authTrustors.push(trustor);
+      index++;
+    } else {
+      break;
     }
   }
 
-  // Inspect each operation
-  for (const op of tx.operations) {
+  // Phase 2: Middle block of user-sourced payments of the regulated asset
+  const paymentCounterparties = new Set<string>();
+  const paymentStartIndex = index;
+
+  while (index < ops.length) {
+    const op = ops[index];
+    if (!op) break;
     const opSource = op.source ?? tx.source;
-
-    // Reject any operation that touches issuer options or signers or trustlines
-    if (op.type === "setOptions" && opSource === ctx.issuer) {
-      throw new PortcullisError(
-        "UNSAFE_TO_SIGN",
-        "SetOptions operation sourced by issuer is forbidden",
-      );
-    }
-
-    if (op.type === "changeTrust" && opSource === ctx.issuer) {
-      throw new PortcullisError(
-        "UNSAFE_TO_SIGN",
-        "ChangeTrust operation sourced by issuer is forbidden",
-      );
-    }
-
     if (opSource === ctx.issuer) {
-      // Every issuer-sourced operation MUST be a trustline flag operation for the regulated asset
-      if (op.type === "setTrustLineFlags") {
-        const flagOp = op as OperationRecord & {
-          trustor: string;
-          asset: { isNative?(): boolean; getCode?(): string; getIssuer?(): string };
-        };
+      // Reached trailing block of issuer operations
+      break;
+    }
 
-        if (
-          flagOp.asset.isNative?.() ||
-          flagOp.asset.getCode?.() !== ctx.assetCode ||
-          flagOp.asset.getIssuer?.() !== ctx.issuer
-        ) {
-          throw new PortcullisError(
-            "UNSAFE_TO_SIGN",
-            "Issuer-sourced SetTrustLineFlags targets a different asset",
-          );
-        }
+    if (op.type !== "payment") {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `User-sourced operation at index ${index} is type "${op.type}", only "payment" is permitted`,
+      );
+    }
 
-        if (!userAccounts.has(flagOp.trustor)) {
-          throw new PortcullisError(
-            "UNSAFE_TO_SIGN",
-            `Issuer-sourced SetTrustLineFlags targets unrelated account: ${flagOp.trustor}`,
-          );
-        }
-      } else if (op.type === "allowTrust") {
-        const allowOp = op as OperationRecord & {
-          trustor: string;
-          assetCode: string;
-        };
+    const paymentOp = op as OperationRecord & {
+      destination?: string;
+      source?: string;
+      asset?: unknown;
+    };
 
-        if (allowOp.assetCode !== ctx.assetCode) {
-          throw new PortcullisError(
-            "UNSAFE_TO_SIGN",
-            "Issuer-sourced AllowTrust targets a different asset code",
-          );
-        }
+    if (paymentOp.source === ctx.issuer || paymentOp.destination === ctx.issuer) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Payment at index ${index} touches issuer account directly`,
+      );
+    }
 
-        if (!userAccounts.has(allowOp.trustor)) {
-          throw new PortcullisError(
-            "UNSAFE_TO_SIGN",
-            `Issuer-sourced AllowTrust targets unrelated account: ${allowOp.trustor}`,
-          );
-        }
-      } else {
-        throw new PortcullisError(
-          "UNSAFE_TO_SIGN",
-          `Issuer cannot source operation of type: "${op.type}"`,
-        );
-      }
-    } else {
-      // User-sourced operations: only payments of the regulated asset
-      if (op.type !== "payment") {
-        throw new PortcullisError(
-          "UNSAFE_TO_SIGN",
-          `User-sourced operation of type "${op.type}" is not permitted in approved transactions`,
-        );
-      }
+    if (!paymentOp.destination) {
+      throw new PortcullisError("UNSAFE_TO_SIGN", `Payment at index ${index} missing destination`);
+    }
+
+    if (!matchesRegulatedAsset(paymentOp.asset, ctx.assetCode, ctx.issuer)) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Payment at index ${index} is not for regulated asset ${ctx.assetCode}:${ctx.issuer}`,
+      );
+    }
+
+    paymentCounterparties.add(opSource);
+    paymentCounterparties.add(paymentOp.destination);
+    index++;
+  }
+
+  if (index === paymentStartIndex) {
+    throw new PortcullisError("UNSAFE_TO_SIGN", "Transaction contains no user payment operations");
+  }
+
+  // Phase 3: Trailing block of issuer-sourced deauthorize operations
+  const deauthTrustors: string[] = [];
+  const seenDeauthTrustors = new Set<string>();
+
+  while (index < ops.length) {
+    const op = ops[index];
+    if (!op) break;
+    const opSource = op.source ?? tx.source;
+    if (opSource !== ctx.issuer) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Non-issuer operation at index ${index} encountered after payment block`,
+      );
+    }
+
+    const trustor = isDeauthorizeOp(op, ctx.issuer, ctx.assetCode);
+    if (!trustor) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Issuer operation at index ${index} is not a valid deauthorize operation for ${ctx.assetCode}`,
+      );
+    }
+
+    if (seenDeauthTrustors.has(trustor)) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Duplicate deauthorize operation for trustor: ${trustor}`,
+      );
+    }
+
+    seenDeauthTrustors.add(trustor);
+    deauthTrustors.push(trustor);
+    index++;
+  }
+
+  // Check sandwich balance:
+  if (authTrustors.length !== deauthTrustors.length) {
+    throw new PortcullisError(
+      "UNSAFE_TO_SIGN",
+      `Authorize count (${authTrustors.length}) does not match deauthorize count (${deauthTrustors.length})`,
+    );
+  }
+
+  for (const trustor of seenAuthTrustors) {
+    if (!seenDeauthTrustors.has(trustor)) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Trustor ${trustor} authorized but not deauthorized`,
+      );
+    }
+    if (!paymentCounterparties.has(trustor)) {
+      throw new PortcullisError(
+        "UNSAFE_TO_SIGN",
+        `Trustor ${trustor} is authorized/deauthorized but does not participate in payments`,
+      );
     }
   }
 }
