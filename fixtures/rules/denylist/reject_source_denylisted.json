@@ -1,26 +1,26 @@
 {
-  "name": "Reject: payment source is not in allowlist",
+  "name": "Reject: payment source is on denylist",
   "ruleConfig": {
-    "id": "allowlist",
-    "path": "fixtures/rules/allowlist/test_allowlist.csv"
+    "id": "denylist",
+    "path": "fixtures/rules/denylist/test_denylist.csv"
   },
   "context": {
-    "txHash": "tx_allowlist_reject_source",
+    "txHash": "tx_denylist_reject_source",
     "nowMs": 1700000000000,
     "payments": [
       {
-        "from": "GABPCMNFU3WWSY2G457BK6FS2QMABCA2MUOLQ7J23VVVWALI6EXUXUXR",
+        "from": "GDQEF22WG65DO4VI5TQNTKYXDMWN6TGBYBEIIR5F6MQDRVTEON2VVJS5",
         "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
         "asset": {
           "code": "GOAT",
           "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
         },
-        "amount": "50.0000000"
+        "amount": "100.0000000"
       }
     ]
   },
   "expected": {
     "outcome": "reject",
-    "code": "NOT_ALLOWLISTED"
+    "code": "DENYLISTED"
   }
 }

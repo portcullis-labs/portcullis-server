@@ -1,0 +1,35 @@
+{
+  "name": "Reject: multiple payments where one recipient is on denylist",
+  "ruleConfig": {
+    "id": "denylist",
+    "path": "fixtures/rules/denylist/test_denylist.csv"
+  },
+  "context": {
+    "txHash": "tx_denylist_multi_reject",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "100.0000000"
+      },
+      {
+        "from": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "to": "GBZTSRSHY2LXB3V2MEN7AOBI2GARVYJSSU734HKZXS2FN4JJMUBOFFJK",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "50.0000000"
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "reject",
+    "code": "DENYLISTED"
+  }
+}
