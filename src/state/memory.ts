@@ -17,12 +17,21 @@ export class MemoryStateStore implements StateStore {
   }
 
   /**
-   * Sums all active (unexpired) reservations for a given account and direction.
+   * Sums all active (unexpired) reservations for a given account and direction,
+   * optionally excluding reservations from a specific transaction hash (e.g. self on retry).
    */
-  async sumReserved(account: string, direction: "in" | "out", nowMs: number): Promise<Stroops> {
+  async sumReserved(
+    account: string,
+    direction: "in" | "out",
+    nowMs: number,
+    excludeTxHash?: string,
+  ): Promise<Stroops> {
     let total = 0n;
 
     for (const res of this.reservations.values()) {
+      if (excludeTxHash !== undefined && res.txHash === excludeTxHash) {
+        continue;
+      }
       if (res.account === account && res.direction === direction && res.expiresAtMs > nowMs) {
         total += res.amount;
       }

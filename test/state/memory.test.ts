@@ -63,6 +63,35 @@ describe("MemoryStateStore", () => {
     expect(await store.sumReserved("accA", "in", 1000)).toBe(500n);
   });
 
+  it("should exclude specified excludeTxHash from sumReserved", async () => {
+    const store = new MemoryStateStore();
+    await store.reserve({
+      txHash: "tx_self",
+      account: "accA",
+      asset: dummyAsset,
+      amount: 1000n,
+      direction: "in",
+      expiresAtMs: 5000,
+    });
+    await store.reserve({
+      txHash: "tx_other",
+      account: "accA",
+      asset: dummyAsset,
+      amount: 500n,
+      direction: "in",
+      expiresAtMs: 5000,
+    });
+
+    // Without exclusion: 1500n
+    expect(await store.sumReserved("accA", "in", 1000)).toBe(1500n);
+
+    // Excluding tx_self: only tx_other counts (500n)
+    expect(await store.sumReserved("accA", "in", 1000, "tx_self")).toBe(500n);
+
+    // Excluding tx_other: only tx_self counts (1000n)
+    expect(await store.sumReserved("accA", "in", 1000, "tx_other")).toBe(1000n);
+  });
+
   it("should release all reservations for a given txHash", async () => {
     const store = new MemoryStateStore();
     await store.reserve({
@@ -98,65 +127,66 @@ describe("MemoryStateStore", () => {
   it("should handle simultaneous concurrent reservations without lost entries", async () => {
     const store = new MemoryStateStore();
     const count = 50;
-    const promises = Array.from({ length: count }, (_, i) =>
-      store.reserve({
-        txHash: `tx_${i}`,
-        account: "sharedAccount",
-        asset: dummyAsset,
-        amount: 100n,
-        direction: "in",
-        expiresAtMs: 10000,
-      }),
-    );
+    const promises: Promise<void>[] = [];
+
+    for (let i = 0; i < count; i++) {
+      promises.push(
+        store.reserve({
+          txHash: `tx_${i}`,
+          account: "shared_account",
+          asset: dummyAsset,
+          amount: 100n,
+          direction: "in",
+          expiresAtMs: 10000,
+        }),
+      );
+    }
 
     await Promise.all(promises);
-    expect(await store.sumReserved("sharedAccount", "in", 1000)).toBe(BigInt(count) * 100n);
+    expect(await store.sumReserved("shared_account", "in", 1000)).toBe(BigInt(count) * 100n);
   });
 
-  it("property: sumReserved equals the sum of unexpired reservations", async () => {
+  it("property test: sumReserved equals the sum of unexpired reservations", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.array(
           fc.record({
-            txHash: fc.stringMatching(/^[a-f0-9]{4,8}$/),
-            account: fc.constantFrom("accA", "accB", "accC"),
-            amount: fc.bigInt({ min: 1n, max: 1000000000n }),
-            direction: fc.constantFrom("in" as const, "out" as const),
-            expiresAtMs: fc.integer({ min: 1000, max: 10000 }),
+            txHash: fc.stringMatching(/^[a-z0-9]{4,10}$/),
+            account: fc.constantFrom("acc1", "acc2", "acc3"),
+            amount: fc.bigInt({ min: 1n, max: 1_000_000_000n }),
+            direction: fc.constantFrom<"in" | "out">("in", "out"),
+            expiresAtMs: fc.integer({ min: 100, max: 1000 }),
           }),
-          { minLength: 1, maxLength: 50 },
+          { minLength: 1, maxLength: 30 },
         ),
-        fc.integer({ min: 500, max: 12000 }),
-        async (reservationsList, queryNowMs) => {
+        fc.integer({ min: 0, max: 1200 }),
+        fc.constantFrom("acc1", "acc2", "acc3"),
+        fc.constantFrom<"in" | "out">("in", "out"),
+        async (rawReservations, nowMs, queryAccount, queryDirection) => {
           const store = new MemoryStateStore();
+          const latestMap = new Map<string, Reservation>();
 
-          // Apply reservations
-          for (const item of reservationsList) {
-            await store.reserve({
-              ...item,
+          for (const raw of rawReservations) {
+            const res: Reservation = {
+              ...raw,
               asset: dummyAsset,
-            });
-          }
-
-          // Calculate expected sum for ("accA", "in") manually tracking idempotency
-          const latestMap = new Map<string, (typeof reservationsList)[number]>();
-          for (const item of reservationsList) {
-            const key = `${item.txHash}:${item.account}:${item.direction}`;
-            latestMap.set(key, item);
+            };
+            await store.reserve(res);
+            latestMap.set(`${res.txHash}:${res.account}:${res.direction}`, res);
           }
 
           let expectedSum = 0n;
-          for (const item of latestMap.values()) {
+          for (const res of latestMap.values()) {
             if (
-              item.account === "accA" &&
-              item.direction === "in" &&
-              item.expiresAtMs > queryNowMs
+              res.account === queryAccount &&
+              res.direction === queryDirection &&
+              res.expiresAtMs > nowMs
             ) {
-              expectedSum += item.amount;
+              expectedSum += res.amount;
             }
           }
 
-          const actualSum = await store.sumReserved("accA", "in", queryNowMs);
+          const actualSum = await store.sumReserved(queryAccount, queryDirection, nowMs);
           expect(actualSum).toBe(expectedSum);
         },
       ),

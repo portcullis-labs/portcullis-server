@@ -11,7 +11,12 @@ export interface Reservation {
 
 export interface StateStore {
   reserve(r: Reservation): Promise<void>;
-  sumReserved(account: string, direction: "in" | "out", nowMs: number): Promise<Stroops>;
+  sumReserved(
+    account: string,
+    direction: "in" | "out",
+    nowMs: number,
+    excludeTxHash?: string,
+  ): Promise<Stroops>;
   release(txHash: string): Promise<void>;
   purgeExpired(nowMs: number): Promise<number>;
 }
