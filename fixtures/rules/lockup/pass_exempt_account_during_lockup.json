@@ -1,0 +1,27 @@
+{
+  "name": "Pass: source account is exempt from lockup",
+  "ruleConfig": {
+    "id": "lockup",
+    "until": "2027-01-01T00:00:00.000Z",
+    "applyTo": ["source"],
+    "exempt": ["GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"]
+  },
+  "context": {
+    "txHash": "tx_lockup_pass_exempt",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "100.0000000"
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "pass"
+  }
+}
