@@ -20,7 +20,14 @@ export class HoldingCapRule implements Rule {
 
     for (const [destination, txInflow] of txInflowsByDestination.entries()) {
       const accountState = ctx.accounts.get(destination);
-      const currentBalance = accountState?.balance ?? 0n;
+      if (!accountState) {
+        return {
+          outcome: "reject",
+          code: "ACCOUNT_STATE_MISSING",
+          message: `Account state missing for destination account ${destination}`,
+        };
+      }
+      const currentBalance = accountState.balance;
       const reservedInflows = await ctx.store.sumReserved(destination, "in", ctx.nowMs, ctx.txHash);
 
       const projectedBalance = currentBalance + reservedInflows + txInflow;

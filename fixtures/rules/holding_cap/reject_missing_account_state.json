@@ -1,0 +1,27 @@
+{
+  "name": "Reject: destination account state is missing from context",
+  "ruleConfig": {
+    "id": "holding_cap",
+    "max": "1000.0000000"
+  },
+  "context": {
+    "txHash": "tx_holding_missing_account",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "100.0000000"
+      }
+    ],
+    "accounts": {}
+  },
+  "expected": {
+    "outcome": "reject",
+    "code": "ACCOUNT_STATE_MISSING"
+  }
+}
