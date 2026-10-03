@@ -1,0 +1,25 @@
+{
+  "name": "Pass: all payment participants are allowlisted",
+  "ruleConfig": {
+    "id": "allowlist",
+    "path": "fixtures/rules/allowlist/test_allowlist.csv"
+  },
+  "context": {
+    "txHash": "tx_allowlist_pass_1",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "100.0000000"
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "pass"
+  }
+}

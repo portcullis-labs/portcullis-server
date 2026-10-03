@@ -1,0 +1,26 @@
+{
+  "name": "Reject: payment source is not in allowlist",
+  "ruleConfig": {
+    "id": "allowlist",
+    "path": "fixtures/rules/allowlist/test_allowlist.csv"
+  },
+  "context": {
+    "txHash": "tx_allowlist_reject_source",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GCKAZHB2SPO7KG6GGLF2KOC7P6ZNYZ4C6EBRX3Y5N4XNZTWB33D62F3U",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "50.0000000"
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "reject",
+    "code": "NOT_ALLOWLISTED"
+  }
+}
