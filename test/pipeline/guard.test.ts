@@ -102,8 +102,16 @@ describe("safe-to-sign guard golden fixtures", () => {
       clawbackEnabled?: boolean;
     }) {
       const b = new TransactionBuilder(
-        { accountId: () => userKp.publicKey(), sequenceNumber: () => "100", incrementSequenceNumber: () => {} },
-        { fee: "100", networkPassphrase: Networks.TESTNET, timebounds: { minTime: 0, maxTime: 1000 } },
+        {
+          accountId: () => userKp.publicKey(),
+          sequenceNumber: () => "100",
+          incrementSequenceNumber: () => {},
+        },
+        {
+          fee: "100",
+          networkPassphrase: Networks.TESTNET,
+          timebounds: { minTime: 0, maxTime: 1000 },
+        },
       );
       b.addOperation(
         Operation.setTrustLineFlags({
