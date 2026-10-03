@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import type { ApprovalDependencies } from "../pipeline/runner.js";
+import { handleTxApprove } from "./routes/tx-approve.js";
 
-export function createServerApp() {
+export function createServerApp(deps?: ApprovalDependencies) {
   const app = new Hono();
 
   // CORS middleware: set Access-Control-Allow-Origin: * on all responses and handle OPTIONS preflight
@@ -14,6 +16,10 @@ export function createServerApp() {
     await next();
     c.header("Access-Control-Allow-Origin", "*");
   });
+
+  if (deps) {
+    app.post("/tx_approve", (c) => handleTxApprove(c, deps));
+  }
 
   // Not Found handler: returns 404 JSON with CORS
   app.notFound((c) => {
