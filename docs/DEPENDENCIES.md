@@ -19,3 +19,6 @@ This document records the exact versions of all dependencies used in `portcullis
 | `@stellar/stellar-sdk` | `17.2.1` | 2026-10-03 | Stellar SDK for key handling, Horizon, and XDR operations |
 | `yaml` | `2.9.1` | 2026-10-03 | YAML parser for configuration files |
 | `zod` | `4.6.5` | 2026-10-03 | Schema definition and validation for configuration and input data |
+| `hono` | `4.13.12` | 2026-10-03 | Lightweight web framework for HTTP API routes and middleware |
+| `@hono/node-server` | `2.1.3` | 2026-10-03 | Node.js HTTP adapter for Hono applications |
+
