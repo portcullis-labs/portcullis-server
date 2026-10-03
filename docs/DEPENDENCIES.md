@@ -7,7 +7,7 @@ This document records the exact versions of all dependencies used in `portcullis
 | Package | Version | Date Checked | Purpose |
 |---|---|---|---|
 | `@biomejs/biome` | `2.5.15` | 2026-10-02 | Code formatting and linting |
-| `@types/node` | `26.6.4` | 2026-10-02 | TypeScript type definitions for Node.js runtime |
+| `@types/node` | `24.19.0` | 2026-10-03 | TypeScript type definitions for Node.js runtime (major matches Node 24 runtime in `.nvmrc`) |
 | `typescript` | `7.0.2` | 2026-10-02 | TypeScript compiler and static type checking |
 | `vitest` | `5.0.3` | 2026-10-02 | Unit testing framework |
 
