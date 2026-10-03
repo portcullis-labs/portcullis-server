@@ -7,7 +7,6 @@
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/src/version.js",
     "test": "vitest run",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit"
