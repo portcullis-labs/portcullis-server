@@ -43,8 +43,8 @@ function isAuthorizeOp(op: OperationRecord, issuer: string, assetCode: string): 
     if (!matchesRegulatedAsset(flagOp.asset, assetCode, issuer)) return null;
     if (
       flagOp.flags?.authorized === true &&
-      !flagOp.flags?.authorizedToMaintainLiabilities &&
-      !flagOp.flags?.clawbackEnabled
+      flagOp.flags?.authorizedToMaintainLiabilities === undefined &&
+      flagOp.flags?.clawbackEnabled === undefined
     ) {
       return flagOp.trustor && flagOp.trustor !== issuer ? flagOp.trustor : null;
     }
@@ -86,8 +86,8 @@ function isDeauthorizeOp(op: OperationRecord, issuer: string, assetCode: string)
     if (!matchesRegulatedAsset(flagOp.asset, assetCode, issuer)) return null;
     if (
       flagOp.flags?.authorized === false &&
-      !flagOp.flags?.authorizedToMaintainLiabilities &&
-      !flagOp.flags?.clawbackEnabled
+      flagOp.flags?.authorizedToMaintainLiabilities === undefined &&
+      flagOp.flags?.clawbackEnabled === undefined
     ) {
       return flagOp.trustor && flagOp.trustor !== issuer ? flagOp.trustor : null;
     }
@@ -269,7 +269,7 @@ export function assertSafeToSign(
     index++;
   }
 
-  // Check sandwich balance:
+  // Check sandwich balance and bidirectional counterparty correspondence:
   if (authTrustors.length !== deauthTrustors.length) {
     throw new PortcullisError(
       "UNSAFE_TO_SIGN",
@@ -292,3 +292,4 @@ export function assertSafeToSign(
     }
   }
 }
+
