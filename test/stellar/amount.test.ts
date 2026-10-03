@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { PortcullisError } from "../../src/errors.js";
 import {
@@ -97,20 +98,15 @@ describe("stellar amount parsing and formatting", () => {
       }
     });
 
-    it("should round-trip across a wide range of pseudorandom BigInt values", () => {
-      // Deterministic PRNG for test reproducibility without external seed libraries
-      let seed = 42n;
-      const nextRandBigInt = (max: bigint): bigint => {
-        seed = (seed * 6364136223846793005n + 1442695040888963407n) & 0xffffffffffffffffn;
-        return seed % (max + 1n);
-      };
-
-      for (let i = 0; i < 2000; i++) {
-        const val = nextRandBigInt(MAX_STROOPS);
-        const formatted = formatStroops(val);
-        const parsed = parseAmountToStroops(formatted);
-        expect(parsed).toBe(val);
-      }
+    it("should round-trip across fast-check generated BigInt property suite", () => {
+      fc.assert(
+        fc.property(fc.bigInt({ min: 0n, max: MAX_STROOPS }), (val) => {
+          const formatted = formatStroops(val);
+          const parsed = parseAmountToStroops(formatted);
+          return parsed === val;
+        }),
+        { numRuns: 1000 },
+      );
     });
   });
 });
