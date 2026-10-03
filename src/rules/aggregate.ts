@@ -18,15 +18,27 @@ const OUTCOME_PRECEDENCE: Record<RuleResult["outcome"], number> = {
  * and aggregates to a final decision based on precedence:
  * reject > action_required > pending > pass.
  * Ties are broken by the order of rules in the config.
+ * Any rule exception fails closed with { outcome: "reject", code: "RULE_ERROR", message: "Rule evaluation failed" }.
  */
 export async function evaluateAndAggregate(
   rules: Rule[],
   ctx: RuleContext,
+  onRuleError?: (ruleId: string, error: unknown) => void,
 ): Promise<AggregatedDecision> {
   const results: IndividualRuleResult[] = [];
 
   for (const rule of rules) {
-    const res = await rule.evaluate(ctx);
+    let res: RuleResult;
+    try {
+      res = await rule.evaluate(ctx);
+    } catch (err) {
+      onRuleError?.(rule.id, err);
+      res = {
+        outcome: "reject",
+        code: "RULE_ERROR",
+        message: "Rule evaluation failed",
+      };
+    }
     results.push({
       ruleId: rule.id,
       result: res,

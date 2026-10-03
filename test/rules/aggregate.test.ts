@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { evaluateAndAggregate } from "../../src/rules/aggregate.js";
 import type { Rule, RuleContext, RuleResult } from "../../src/rules/types.js";
 import type { StateStore } from "../../src/state/types.js";
@@ -100,7 +100,7 @@ describe("rule aggregation", () => {
     });
     const rReject2 = createMockRule("reject2", {
       outcome: "reject",
-      code: "DENYLISTED",
+      code: "HOLDING_CAP",
       message: "Second reject",
     });
 
@@ -112,5 +112,50 @@ describe("rule aggregation", () => {
       code: "PER_TX_LIMIT",
       message: "First reject",
     });
+  });
+
+  it("should fail closed with RULE_ERROR and notify onRuleError when a rule throws synchronously", async () => {
+    const errorObj = new Error("Boom sync");
+    const throwingRule: Rule = {
+      id: "throw_sync",
+      evaluate: () => {
+        throw errorObj;
+      },
+    };
+    const passRule = createMockRule("passRule", { outcome: "pass" });
+    const onError = vi.fn();
+
+    const decision = await evaluateAndAggregate([passRule, throwingRule], dummyContext, onError);
+
+    expect(decision.outcome).toBe("reject");
+    expect(decision.winningRuleId).toBe("throw_sync");
+    expect(decision.winningResult).toEqual({
+      outcome: "reject",
+      code: "RULE_ERROR",
+      message: "Rule evaluation failed",
+    });
+    expect(onError).toHaveBeenCalledWith("throw_sync", errorObj);
+  });
+
+  it("should fail closed with RULE_ERROR and notify onRuleError when a rule rejects asynchronously", async () => {
+    const errorObj = new Error("Boom async");
+    const rejectingRule: Rule = {
+      id: "reject_async",
+      evaluate: async () => {
+        throw errorObj;
+      },
+    };
+    const onError = vi.fn();
+
+    const decision = await evaluateAndAggregate([rejectingRule], dummyContext, onError);
+
+    expect(decision.outcome).toBe("reject");
+    expect(decision.winningRuleId).toBe("reject_async");
+    expect(decision.winningResult).toEqual({
+      outcome: "reject",
+      code: "RULE_ERROR",
+      message: "Rule evaluation failed",
+    });
+    expect(onError).toHaveBeenCalledWith("reject_async", errorObj);
   });
 });
