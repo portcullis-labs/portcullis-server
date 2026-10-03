@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Networks, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Networks, type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { PortcullisError } from "../../src/errors.js";
 import { assertSafeToSign, type GuardContext } from "../../src/pipeline/guard.js";
@@ -48,4 +48,39 @@ describe("safe-to-sign guard golden fixtures", () => {
       }
     });
   }
+
+  it("rejects when transaction has empty operations", () => {
+    const emptyTx = {
+      source: "GCAXSG5YHH7G5HDCXAWX4PJA2P2Y2RCL2V45E3N7276X5P7XNYO3B7M2",
+      operations: [],
+    } as unknown as Transaction;
+
+    expect(() =>
+      assertSafeToSign(emptyTx, {
+        issuer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        assetCode: "USDC",
+        maxOperations: 10,
+      }),
+    ).toThrow(PortcullisError);
+  });
+
+  it("rejects unknown user-sourced operations like accountMerge", () => {
+    const invalidTx = {
+      source: "GCAXSG5YHH7G5HDCXAWX4PJA2P2Y2RCL2V45E3N7276X5P7XNYO3B7M2",
+      operations: [
+        {
+          type: "accountMerge",
+          destination: "GAYOLLLUI437MDRO6ZOH2EQWAKP6K2H5QY4M65HQJMMY7YQDVG2DEB5A",
+        },
+      ],
+    } as unknown as Transaction;
+
+    expect(() =>
+      assertSafeToSign(invalidTx, {
+        issuer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        assetCode: "USDC",
+        maxOperations: 10,
+      }),
+    ).toThrow(PortcullisError);
+  });
 });
