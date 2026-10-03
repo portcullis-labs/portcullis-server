@@ -1,0 +1,26 @@
+{
+  "name": "Pass: payment amount strictly below limit",
+  "ruleConfig": {
+    "id": "per_tx_limit",
+    "max": "100.0000000"
+  },
+  "context": {
+    "txHash": "tx_under_limit",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "99.9999999"
+      }
+    ],
+    "accounts": {}
+  },
+  "expected": {
+    "outcome": "pass"
+  }
+}
