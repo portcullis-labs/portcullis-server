@@ -449,4 +449,102 @@ describe("pipeline runner end-to-end", () => {
     expect(reportedInternalError).toBeInstanceOf(Error);
     expect((reportedInternalError as Error).message).toContain("TEST_SECRET_VALUE_123");
   });
+
+  it("rejects when payment source has no trustline (400 NO_TRUSTLINE)", async () => {
+    const tx = buildPaymentTx(user1Kp, user2Kp.publicKey(), "50.0000000");
+    const store = new MemoryStateStore();
+    const logger = new DecisionLogger({ path: testLogPath, includeXdr: false });
+
+    const noSourceTrustProvider = new AccountStateProvider(config.horizon, async (input) => {
+      const url = String(input);
+      const isSource = url.includes(user1Kp.publicKey());
+      return new Response(
+        JSON.stringify({
+          id: isSource ? user1Kp.publicKey() : user2Kp.publicKey(),
+          balances: isSource
+            ? [] // No trustline on source
+            : [
+                {
+                  asset_type: "credit_alphanumeric4",
+                  asset_code: "USDC",
+                  asset_issuer: issuerKp.publicKey(),
+                  balance: "1000.0000000",
+                  is_authorized: false,
+                },
+              ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const result = await runApproval(
+      { tx: tx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer,
+        stateStore: store,
+        accountStateProvider: noSourceTrustProvider,
+        decisionLogger: logger,
+      },
+    );
+
+    expect(result.httpStatus).toBe(400);
+    expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
+    if (result.body.status === "rejected") {
+      expect(result.body.error).toContain("Payment source account");
+      expect(result.body.error).toContain(user1Kp.publicKey());
+      expect(result.body.error).toContain("does not have a trustline");
+    }
+  });
+
+  it("rejects when payment destination has no trustline (400 NO_TRUSTLINE)", async () => {
+    const tx = buildPaymentTx(user1Kp, user2Kp.publicKey(), "50.0000000");
+    const store = new MemoryStateStore();
+    const logger = new DecisionLogger({ path: testLogPath, includeXdr: false });
+
+    const noDestTrustProvider = new AccountStateProvider(config.horizon, async (input) => {
+      const url = String(input);
+      const isDest = url.includes(user2Kp.publicKey());
+      return new Response(
+        JSON.stringify({
+          id: isDest ? user2Kp.publicKey() : user1Kp.publicKey(),
+          balances: isDest
+            ? [] // No trustline on destination
+            : [
+                {
+                  asset_type: "credit_alphanumeric4",
+                  asset_code: "USDC",
+                  asset_issuer: issuerKp.publicKey(),
+                  balance: "1000.0000000",
+                  is_authorized: false,
+                },
+              ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const result = await runApproval(
+      { tx: tx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer,
+        stateStore: store,
+        accountStateProvider: noDestTrustProvider,
+        decisionLogger: logger,
+      },
+    );
+
+    expect(result.httpStatus).toBe(400);
+    expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
+    if (result.body.status === "rejected") {
+      expect(result.body.error).toContain("Payment destination account");
+      expect(result.body.error).toContain(user2Kp.publicKey());
+      expect(result.body.error).toContain("does not have a trustline");
+    }
+  });
 });

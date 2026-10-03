@@ -157,6 +157,24 @@ export async function runApproval(
           };
         }
 
+        // 5b. Verify all payment participants have a trustline for the regulated asset
+        for (const p of classified.payments) {
+          const sourceState = accountStates.get(p.from);
+          if (!sourceState || !sourceState.hasTrustline) {
+            throw new PortcullisError(
+              "NO_TRUSTLINE",
+              `Payment source account ${p.from} does not have a trustline for ${deps.config.asset.code}:${deps.config.asset.issuer}`,
+            );
+          }
+          const destState = accountStates.get(p.to);
+          if (!destState || !destState.hasTrustline) {
+            throw new PortcullisError(
+              "NO_TRUSTLINE",
+              `Payment destination account ${p.to} does not have a trustline for ${deps.config.asset.code}:${deps.config.asset.issuer}`,
+            );
+          }
+        }
+
         // 6. Evaluate and aggregate rules
         const ruleContext: RuleContext = {
           txHash,
