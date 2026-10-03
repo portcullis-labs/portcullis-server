@@ -1,0 +1,41 @@
+{
+  "name": "Pass: balance + reserved inflows + payment exactly equals holding cap",
+  "ruleConfig": {
+    "id": "holding_cap",
+    "max": "1000.0000000"
+  },
+  "context": {
+    "txHash": "tx_holding_exact",
+    "nowMs": 1700000000000,
+    "reservations": [
+      {
+        "txHash": "tx_prior_pending",
+        "account": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "direction": "in",
+        "amount": "200.0000000",
+        "expiresAtMs": 1700000060000
+      }
+    ],
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "300.0000000"
+      }
+    ],
+    "accounts": {
+      "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX": {
+        "balance": "500.0000000",
+        "hasTrustline": true,
+        "authorized": true
+      }
+    }
+  },
+  "expected": {
+    "outcome": "pass"
+  }
+}
