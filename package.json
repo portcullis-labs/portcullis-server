@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
+    "test:integration": "PORTCULLIS_TESTNET=1 vitest run test/integration",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit"
   },
