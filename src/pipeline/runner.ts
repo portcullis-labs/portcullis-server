@@ -13,7 +13,8 @@ import { classify } from "./classify.js";
 import { compose } from "./compose.js";
 import { decodeEnvelope } from "./decode.js";
 import { assertSafeToSign } from "./guard.js";
-import { AccountLockManager, withAccountLocks } from "./lock.js";
+import type { AccountLockManager } from "./lock.js";
+import { withAccountLocks } from "./lock.js";
 import { sign } from "./sign.js";
 import { checkTimebounds } from "./timebounds.js";
 import { verifyRequesterSignature } from "./verify-signature.js";
@@ -59,13 +60,36 @@ export interface ApprovalDependencies {
   stateStore: StateStore;
   accountStateProvider: AccountStateProvider;
   decisionLogger: DecisionLogger;
-  lockManager?: AccountLockManager;
+  lockManager: AccountLockManager;
   onInternalError?: (error: unknown) => void;
 }
 
 export interface RunApprovalResult {
   httpStatus: number;
   body: ApprovalResponse;
+}
+
+function safeLogError(
+  deps: ApprovalDependencies,
+  params: {
+    requestId: string;
+    txHash: string;
+    source: string;
+    outcome: "rejected";
+    rules: RuleEvaluationLog[];
+    errorCode: string;
+    durationMs: number;
+    xdr: string;
+  },
+): void {
+  try {
+    deps.decisionLogger.log({
+      timestamp: new Date().toISOString(),
+      ...params,
+    });
+  } catch (logErr) {
+    deps.onInternalError?.(logErr);
+  }
 }
 
 export async function runApproval(
@@ -116,9 +140,6 @@ export async function runApproval(
       }
     }
 
-    // Serialize check-and-reserve per account
-    const lockMgr = deps.lockManager ?? new AccountLockManager();
-
     return await withAccountLocks(
       distinctPaymentAccounts,
       async () => {
@@ -132,21 +153,16 @@ export async function runApproval(
           );
         } catch {
           const durationMs = Date.now() - startTime;
-          try {
-            deps.decisionLogger.log({
-              timestamp: new Date().toISOString(),
-              requestId,
-              txHash,
-              source: txSource,
-              outcome: "rejected",
-              rules: [],
-              errorCode: "UPSTREAM_UNAVAILABLE",
-              durationMs,
-              xdr: request.tx,
-            });
-          } catch {
-            // ignore logging error on upstream rejection
-          }
+          safeLogError(deps, {
+            requestId,
+            txHash,
+            source: txSource,
+            outcome: "rejected",
+            rules: [],
+            errorCode: "UPSTREAM_UNAVAILABLE",
+            durationMs,
+            xdr: request.tx,
+          });
 
           return {
             httpStatus: 400,
@@ -160,14 +176,14 @@ export async function runApproval(
         // 5b. Verify all payment participants have a trustline for the regulated asset
         for (const p of classified.payments) {
           const sourceState = accountStates.get(p.from);
-          if (!sourceState || !sourceState.hasTrustline) {
+          if (!sourceState?.hasTrustline) {
             throw new PortcullisError(
               "NO_TRUSTLINE",
               `Payment source account ${p.from} does not have a trustline for ${deps.config.asset.code}:${deps.config.asset.issuer}`,
             );
           }
           const destState = accountStates.get(p.to);
-          if (!destState || !destState.hasTrustline) {
+          if (!destState?.hasTrustline) {
             throw new PortcullisError(
               "NO_TRUSTLINE",
               `Payment destination account ${p.to} does not have a trustline for ${deps.config.asset.code}:${deps.config.asset.issuer}`,
@@ -203,21 +219,16 @@ export async function runApproval(
         if (agg.winningResult.outcome === "reject") {
           const { code, message } = agg.winningResult;
           const durationMs = Date.now() - startTime;
-          try {
-            deps.decisionLogger.log({
-              timestamp: new Date().toISOString(),
-              requestId,
-              txHash,
-              source: txSource,
-              outcome: "rejected",
-              rules: ruleLogs,
-              errorCode: code,
-              durationMs,
-              xdr: request.tx,
-            });
-          } catch {
-            // ignore log error
-          }
+          safeLogError(deps, {
+            requestId,
+            txHash,
+            source: txSource,
+            outcome: "rejected",
+            rules: ruleLogs,
+            errorCode: code,
+            durationMs,
+            xdr: request.tx,
+          });
 
           return {
             httpStatus: 400,
@@ -242,8 +253,8 @@ export async function runApproval(
               durationMs,
               xdr: request.tx,
             });
-          } catch {
-            // ignore log error
+          } catch (logErr) {
+            deps.onInternalError?.(logErr);
           }
 
           const body: ApprovalResponse = {
@@ -274,8 +285,8 @@ export async function runApproval(
               durationMs,
               xdr: request.tx,
             });
-          } catch {
-            // ignore log error
+          } catch (logErr) {
+            deps.onInternalError?.(logErr);
           }
 
           const body: ApprovalResponse = {
@@ -298,20 +309,47 @@ export async function runApproval(
           };
         }
 
-        // 7. Compose SEP-8 transaction
+        // 7. Check fee cap before compose so both unshaped and already-shaped transactions are bounded
+        const originalOpCount = BigInt(tx.operations.length);
+        const totalOriginalFee = BigInt(tx.fee);
+        const feePerOp = totalOriginalFee / (originalOpCount > 0n ? originalOpCount : 1n);
+        const maxFeePerOp = BigInt(deps.config.approval.maxFeePerOperationStroops);
+        if (feePerOp > maxFeePerOp) {
+          throw new PortcullisError(
+            "UNSUPPORTED_OPERATION",
+            `Fee per operation (${feePerOp} stroops) exceeds maxFeePerOperationStroops (${maxFeePerOp} stroops)`,
+          );
+        }
+
+        // 8. Compose SEP-8 transaction
         const composeResult = compose(tx, classified, deps.config);
 
-        // 8. Safe-to-sign guard
+        // 9. Safe-to-sign guard
         assertSafeToSign(composeResult.tx, {
           issuer: deps.config.asset.issuer,
           assetCode: deps.config.asset.code,
           maxOperations: deps.config.approval.maxOperations,
         });
 
-        // 9. Sign transaction with issuer key
+        // 10. (Step 1) Sign transaction with issuer key
         const signedTx = await sign(composeResult.tx, composeResult.revised, deps.signer);
 
-        // 10. Reserve quota in state store
+        // 11. (Step 2) Write decision log (MUST succeed before quota reservation)
+        const durationMs = Date.now() - startTime;
+        const outcome = composeResult.revised ? "revised" : "success";
+
+        deps.decisionLogger.log({
+          timestamp: new Date().toISOString(),
+          requestId,
+          txHash,
+          source: txSource,
+          outcome,
+          rules: ruleLogs,
+          durationMs,
+          xdr: request.tx,
+        });
+
+        // 12. (Step 3) Reserve quota in state store
         const expiresAtMs = tx.timeBounds
           ? Number.parseInt(tx.timeBounds.maxTime, 10) * 1000
           : nowMs + deps.config.approval.maxTimeWindowSeconds * 1000;
@@ -335,24 +373,6 @@ export async function runApproval(
           });
         }
 
-        const durationMs = Date.now() - startTime;
-        const outcome = composeResult.revised ? "revised" : "success";
-
-        try {
-          deps.decisionLogger.log({
-            timestamp: new Date().toISOString(),
-            requestId,
-            txHash,
-            source: txSource,
-            outcome,
-            rules: ruleLogs,
-            durationMs,
-            xdr: request.tx,
-          });
-        } catch {
-          // ignore
-        }
-
         const body: ApprovalResponse = composeResult.revised
           ? {
               status: "revised",
@@ -370,7 +390,7 @@ export async function runApproval(
           body,
         };
       },
-      lockMgr,
+      deps.lockManager,
     );
   } catch (err) {
     const durationMs = Date.now() - startTime;
@@ -383,21 +403,16 @@ export async function runApproval(
 
       if (isInternal) {
         deps.onInternalError?.(err);
-        try {
-          deps.decisionLogger.log({
-            timestamp: new Date().toISOString(),
-            requestId,
-            txHash,
-            source: txSource,
-            outcome: "rejected",
-            rules: ruleLogs,
-            errorCode: err.code,
-            durationMs,
-            xdr: request.tx,
-          });
-        } catch (logErr) {
-          deps.onInternalError?.(logErr);
-        }
+        safeLogError(deps, {
+          requestId,
+          txHash,
+          source: txSource,
+          outcome: "rejected",
+          rules: ruleLogs,
+          errorCode: err.code,
+          durationMs,
+          xdr: request.tx,
+        });
 
         return {
           httpStatus: 500,
@@ -409,21 +424,16 @@ export async function runApproval(
       }
 
       // Ordinary client-visible rejection
-      try {
-        deps.decisionLogger.log({
-          timestamp: new Date().toISOString(),
-          requestId,
-          txHash,
-          source: txSource,
-          outcome: "rejected",
-          rules: ruleLogs,
-          errorCode: err.code,
-          durationMs,
-          xdr: request.tx,
-        });
-      } catch {
-        // ignore log error
-      }
+      safeLogError(deps, {
+        requestId,
+        txHash,
+        source: txSource,
+        outcome: "rejected",
+        rules: ruleLogs,
+        errorCode: err.code,
+        durationMs,
+        xdr: request.tx,
+      });
 
       return {
         httpStatus: 400,
@@ -436,21 +446,16 @@ export async function runApproval(
 
     // Unexpected runtime exception
     deps.onInternalError?.(err);
-    try {
-      deps.decisionLogger.log({
-        timestamp: new Date().toISOString(),
-        requestId,
-        txHash,
-        source: txSource,
-        outcome: "rejected",
-        rules: ruleLogs,
-        errorCode: "INTERNAL_ERROR",
-        durationMs,
-        xdr: request.tx,
-      });
-    } catch (logErr) {
-      deps.onInternalError?.(logErr);
-    }
+    safeLogError(deps, {
+      requestId,
+      txHash,
+      source: txSource,
+      outcome: "rejected",
+      rules: ruleLogs,
+      errorCode: "INTERNAL_ERROR",
+      durationMs,
+      xdr: request.tx,
+    });
 
     return {
       httpStatus: 500,

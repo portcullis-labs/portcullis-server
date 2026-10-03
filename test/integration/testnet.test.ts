@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import type { PortcullisConfig } from "../../src/config/schema.js";
 import { DecisionLogger } from "../../src/log/logger.js";
+import { AccountLockManager } from "../../src/pipeline/lock.js";
 import { runApproval } from "../../src/pipeline/runner.js";
 import { LocalSigner } from "../../src/signer/local.js";
 import { MemoryStateStore } from "../../src/state/memory.js";
@@ -143,6 +144,7 @@ describe.skipIf(!isTestnetEnabled)("opt-in testnet live round trip", () => {
     const stateStore = new MemoryStateStore();
     const accountStateProvider = new AccountStateProvider(config.horizon);
     const decisionLogger = new DecisionLogger(config.log);
+    const lockManager = new AccountLockManager();
 
     const result = await runApproval(
       { tx: paymentTx.toXDR() },
@@ -153,6 +155,7 @@ describe.skipIf(!isTestnetEnabled)("opt-in testnet live round trip", () => {
         stateStore,
         accountStateProvider,
         decisionLogger,
+        lockManager,
       },
     );
 

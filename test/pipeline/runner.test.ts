@@ -9,7 +9,9 @@ import {
 } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import type { PortcullisConfig } from "../../src/config/schema.js";
+import { PortcullisError } from "../../src/errors.js";
 import { DecisionLogger } from "../../src/log/logger.js";
+import { AccountLockManager } from "../../src/pipeline/lock.js";
 import { runApproval } from "../../src/pipeline/runner.js";
 import { AllowlistRule } from "../../src/rules/allowlist.js";
 import { PerTxLimitRule } from "../../src/rules/per-tx-limit.js";
@@ -59,6 +61,7 @@ describe("pipeline runner end-to-end", () => {
 
   const signer = new LocalSigner(issuerKp.secret(), issuerKp.publicKey());
   const stellarAsset = new Asset(config.asset.code, config.asset.issuer);
+  const lockManager = new AccountLockManager();
 
   const mockFetch: typeof fetch = async (input) => {
     const url = String(input);
@@ -121,6 +124,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -197,6 +201,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -225,6 +230,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -265,6 +271,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -301,6 +308,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -342,6 +350,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -367,6 +376,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -397,6 +407,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider: failingAccountProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -431,6 +442,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider,
         decisionLogger: logger,
+        lockManager,
         onInternalError: (err) => {
           reportedInternalError = err;
         },
@@ -486,6 +498,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider: noSourceTrustProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -535,6 +548,7 @@ describe("pipeline runner end-to-end", () => {
         stateStore: store,
         accountStateProvider: noDestTrustProvider,
         decisionLogger: logger,
+        lockManager,
       },
     );
 
@@ -545,6 +559,142 @@ describe("pipeline runner end-to-end", () => {
       expect(result.body.error).toContain("Payment destination account");
       expect(result.body.error).toContain(user2Kp.publicKey());
       expect(result.body.error).toContain("does not have a trustline");
+    }
+  });
+
+  it("unwritable log path returns 500, preserves no reservations, and returns no signed tx", async () => {
+    const tx = buildPaymentTx(user1Kp, user2Kp.publicKey(), "50.0000000");
+    const store = new MemoryStateStore();
+    const failingLogger = {
+      log: () => {
+        throw new PortcullisError("LOG_FAILURE", "Disk unwritable");
+      },
+    } as unknown as DecisionLogger;
+
+    let reportedError: unknown = null;
+    const result = await runApproval(
+      { tx: tx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer,
+        stateStore: store,
+        accountStateProvider,
+        decisionLogger: failingLogger,
+        lockManager,
+        onInternalError: (err) => {
+          reportedError = err;
+        },
+      },
+    );
+
+    expect(result.httpStatus).toBe(500);
+    expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("tx");
+    if (result.body.status === "rejected") {
+      expect(result.body.error).toBe("Request could not be processed.");
+    }
+    expect(reportedError).toBeInstanceOf(PortcullisError);
+
+    // Verify no quota reservations were written
+    const reservedIn = await store.sumReserved(user2Kp.publicKey(), "in", 1050 * 1000);
+    expect(reservedIn).toBe(0n);
+  });
+
+  it("broken logging in error path still returns HTTP 500 without crashing runner", async () => {
+    const tx = buildPaymentTx(user1Kp, user2Kp.publicKey(), "50.0000000");
+    const store = new MemoryStateStore();
+    const brokenLogger = {
+      log: () => {
+        throw new Error("Log write disk corrupted");
+      },
+    } as unknown as DecisionLogger;
+
+    const throwingSigner = {
+      publicKey: () => issuerKp.publicKey(),
+      signTransaction: async () => {
+        throw new Error("Signer failure");
+      },
+    };
+
+    const reportedErrors: unknown[] = [];
+    const result = await runApproval(
+      { tx: tx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer: throwingSigner,
+        stateStore: store,
+        accountStateProvider,
+        decisionLogger: brokenLogger,
+        lockManager,
+        onInternalError: (err) => {
+          reportedErrors.push(err);
+        },
+      },
+    );
+
+    expect(result.httpStatus).toBe(500);
+    expect(result.body.status).toBe("rejected");
+    if (result.body.status === "rejected") {
+      expect(result.body.error).toBe("Request could not be processed.");
+    }
+    expect(reportedErrors.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("rejects already-shaped transaction when fee per op exceeds maxFeePerOperationStroops", async () => {
+    const account = new Account(user1Kp.publicKey(), "1000");
+    const builder = new TransactionBuilder(account, {
+      fee: "15000", // 3 ops -> 5000 stroops/op > maxFeePerOperationStroops (1000)
+      networkPassphrase: Networks.TESTNET,
+      timebounds: { minTime: 1000, maxTime: 1200 },
+    });
+    builder.addOperation(
+      Operation.setTrustLineFlags({
+        trustor: user2Kp.publicKey(),
+        asset: stellarAsset,
+        flags: { authorized: true },
+        source: issuerKp.publicKey(),
+      }),
+    );
+    builder.addOperation(
+      Operation.payment({
+        destination: user2Kp.publicKey(),
+        asset: stellarAsset,
+        amount: "50.0000000",
+      }),
+    );
+    builder.addOperation(
+      Operation.setTrustLineFlags({
+        trustor: user2Kp.publicKey(),
+        asset: stellarAsset,
+        flags: { authorized: false },
+        source: issuerKp.publicKey(),
+      }),
+    );
+    const shapedTx = builder.build();
+    shapedTx.sign(user1Kp);
+
+    const store = new MemoryStateStore();
+    const logger = new DecisionLogger({ path: testLogPath, includeXdr: false });
+
+    const result = await runApproval(
+      { tx: shapedTx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer,
+        stateStore: store,
+        accountStateProvider,
+        decisionLogger: logger,
+        lockManager,
+      },
+    );
+
+    expect(result.httpStatus).toBe(400);
+    expect(result.body.status).toBe("rejected");
+    if (result.body.status === "rejected") {
+      expect(result.body.error).toContain("exceeds maxFeePerOperationStroops");
     }
   });
 });
