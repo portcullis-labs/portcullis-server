@@ -27,5 +27,47 @@ export function decodeEnvelope(xdrBase64: string, networkPassphrase: string): Tr
     );
   }
 
-  return txOrFeeBump;
+  const tx = txOrFeeBump;
+
+  if (tx.ledgerBounds !== undefined) {
+    throw new PortcullisError(
+      "UNSUPPORTED_OPERATION",
+      "Unsupported transaction precondition: ledgerBounds is not supported in v0.1",
+    );
+  }
+  if (tx.minAccountSequence !== undefined) {
+    throw new PortcullisError(
+      "UNSUPPORTED_OPERATION",
+      "Unsupported transaction precondition: minAccountSequence is not supported in v0.1",
+    );
+  }
+  if (tx.minAccountSequenceAge !== undefined && tx.minAccountSequenceAge !== 0n) {
+    throw new PortcullisError(
+      "UNSUPPORTED_OPERATION",
+      "Unsupported transaction precondition: minAccountSequenceAge is not supported in v0.1",
+    );
+  }
+  if (tx.minAccountSequenceLedgerGap !== undefined && tx.minAccountSequenceLedgerGap !== 0) {
+    throw new PortcullisError(
+      "UNSUPPORTED_OPERATION",
+      "Unsupported transaction precondition: minAccountSequenceLedgerGap is not supported in v0.1",
+    );
+  }
+  if (
+    tx.extraSigners !== undefined &&
+    (Array.isArray(tx.extraSigners) ? tx.extraSigners.length > 0 : true)
+  ) {
+    throw new PortcullisError(
+      "UNSUPPORTED_OPERATION",
+      "Unsupported transaction precondition: extraSigners is not supported in v0.1",
+    );
+  }
+  if (tx.minAccountSequenceAge !== undefined) {
+    throw new PortcullisError(
+      "UNSUPPORTED_OPERATION",
+      "Unsupported transaction precondition: v2 preconditions are not supported in v0.1",
+    );
+  }
+
+  return tx;
 }

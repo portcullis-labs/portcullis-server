@@ -88,4 +88,159 @@ describe("decodeEnvelope", () => {
       expect((err as PortcullisError).code).toBe("UNSUPPORTED_FEE_BUMP");
     }
   });
+
+  it("accepts transactions with timeBounds precondition", () => {
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: network,
+      timebounds: { minTime: "100", maxTime: "500" },
+    })
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "10",
+        }),
+      )
+      .build();
+    tx.sign(kp);
+
+    const decoded = decodeEnvelope(tx.toXdr(), network);
+    expect(decoded.timeBounds).toEqual({ minTime: "100", maxTime: "500" });
+  });
+
+  it("throws UNSUPPORTED_OPERATION for ledgerBounds precondition", () => {
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: network,
+      timebounds: { minTime: "0", maxTime: "1000" },
+      ledgerbounds: { minLedger: 10, maxLedger: 20 },
+    })
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "10",
+        }),
+      )
+      .build();
+    tx.sign(kp);
+
+    expect(() => decodeEnvelope(tx.toXdr(), network)).toThrow(PortcullisError);
+    try {
+      decodeEnvelope(tx.toXdr(), network);
+    } catch (err) {
+      expect(err).toBeInstanceOf(PortcullisError);
+      expect((err as PortcullisError).code).toBe("UNSUPPORTED_OPERATION");
+      expect((err as PortcullisError).message).toContain("ledgerBounds");
+    }
+  });
+
+  it("throws UNSUPPORTED_OPERATION for minAccountSequence precondition", () => {
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: network,
+      timebounds: { minTime: "0", maxTime: "1000" },
+      minAccountSequence: "10",
+    })
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "10",
+        }),
+      )
+      .build();
+    tx.sign(kp);
+
+    expect(() => decodeEnvelope(tx.toXdr(), network)).toThrow(PortcullisError);
+    try {
+      decodeEnvelope(tx.toXdr(), network);
+    } catch (err) {
+      expect(err).toBeInstanceOf(PortcullisError);
+      expect((err as PortcullisError).code).toBe("UNSUPPORTED_OPERATION");
+      expect((err as PortcullisError).message).toContain("minAccountSequence");
+    }
+  });
+
+  it("throws UNSUPPORTED_OPERATION for minAccountSequenceAge precondition", () => {
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: network,
+      timebounds: { minTime: "0", maxTime: "1000" },
+      minAccountSequenceAge: 10n,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "10",
+        }),
+      )
+      .build();
+    tx.sign(kp);
+
+    expect(() => decodeEnvelope(tx.toXdr(), network)).toThrow(PortcullisError);
+    try {
+      decodeEnvelope(tx.toXdr(), network);
+    } catch (err) {
+      expect(err).toBeInstanceOf(PortcullisError);
+      expect((err as PortcullisError).code).toBe("UNSUPPORTED_OPERATION");
+      expect((err as PortcullisError).message).toContain("minAccountSequenceAge");
+    }
+  });
+
+  it("throws UNSUPPORTED_OPERATION for minAccountSequenceLedgerGap precondition", () => {
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: network,
+      timebounds: { minTime: "0", maxTime: "1000" },
+      minAccountSequenceLedgerGap: 10,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "10",
+        }),
+      )
+      .build();
+    tx.sign(kp);
+
+    expect(() => decodeEnvelope(tx.toXdr(), network)).toThrow(PortcullisError);
+    try {
+      decodeEnvelope(tx.toXdr(), network);
+    } catch (err) {
+      expect(err).toBeInstanceOf(PortcullisError);
+      expect((err as PortcullisError).code).toBe("UNSUPPORTED_OPERATION");
+      expect((err as PortcullisError).message).toContain("minAccountSequenceLedgerGap");
+    }
+  });
+
+  it("throws UNSUPPORTED_OPERATION for extraSigners precondition", () => {
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: network,
+      timebounds: { minTime: "0", maxTime: "1000" },
+      extraSigners: [Keypair.random().publicKey()],
+    })
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "10",
+        }),
+      )
+      .build();
+    tx.sign(kp);
+
+    expect(() => decodeEnvelope(tx.toXdr(), network)).toThrow(PortcullisError);
+    try {
+      decodeEnvelope(tx.toXdr(), network);
+    } catch (err) {
+      expect(err).toBeInstanceOf(PortcullisError);
+      expect((err as PortcullisError).code).toBe("UNSUPPORTED_OPERATION");
+      expect((err as PortcullisError).message).toContain("extraSigners");
+    }
+  });
 });
