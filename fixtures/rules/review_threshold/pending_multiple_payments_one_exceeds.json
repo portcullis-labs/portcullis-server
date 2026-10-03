@@ -1,0 +1,39 @@
+{
+  "name": "Pending: multiple payments where one exceeds threshold and txHash is not approved",
+  "ruleConfig": {
+    "id": "review_threshold",
+    "above": "5000.0000000",
+    "timeoutMs": 30000,
+    "message": "Transaction exceeds review threshold",
+    "approvedTxHashesPath": "fixtures/rules/review_threshold/test_approved_hashes.txt"
+  },
+  "context": {
+    "txHash": "deadbeef00000000000000000000000000000000000000000000000000000000",
+    "nowMs": 1700000000000,
+    "payments": [
+      {
+        "from": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "to": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "100.0000000"
+      },
+      {
+        "from": "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
+        "to": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
+        "asset": {
+          "code": "GOAT",
+          "issuer": "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW"
+        },
+        "amount": "6000.0000000"
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "pending",
+    "timeoutMs": 30000,
+    "message": "Transaction exceeds review threshold"
+  }
+}
