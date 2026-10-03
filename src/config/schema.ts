@@ -149,7 +149,9 @@ export const configSchema = z
   });
 
 export type PortcullisConfig = z.infer<typeof configSchema>;
+export type HorizonConfig = PortcullisConfig["horizon"];
 export type RuleConfig = z.infer<typeof ruleConfigSchema>;
+
 export type PerTxLimitRuleConfig = z.infer<typeof perTxLimitRuleSchema>;
 export type HoldingCapRuleConfig = z.infer<typeof holdingCapRuleSchema>;
 export type AllowlistRuleConfig = z.infer<typeof allowlistRuleSchema>;
