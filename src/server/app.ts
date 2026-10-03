@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ApprovalDependencies } from "../pipeline/runner.js";
 import { handleHealth } from "./routes/health.js";
+import { handleStellarToml } from "./routes/stellar-toml.js";
 import { handleTxApprove } from "./routes/tx-approve.js";
 
 export function createServerApp(deps?: ApprovalDependencies) {
@@ -20,6 +21,7 @@ export function createServerApp(deps?: ApprovalDependencies) {
 
   if (deps) {
     app.post("/tx_approve", (c) => handleTxApprove(c, deps));
+    app.get("/.well-known/stellar.toml", (c) => handleStellarToml(c, deps.config));
   }
 
   app.get("/health", (c) => handleHealth(c));
