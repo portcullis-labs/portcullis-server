@@ -1,4 +1,4 @@
-# Portcullis Server: Specification (v0.1)
+# Portcullis Server: Specification (v0.1.1)
 
 Tags: **[SPEC]** from SEP-8. **[DESIGN]** a choice made here. If the live SEP-8 text differs, SEP-8 wins and the difference is recorded in DECISIONS.md.
 
@@ -37,7 +37,7 @@ Rules operate on these plain types, not on raw XDR.
 
 ## 5. Errors (src/errors.ts)
 `class PortcullisError extends Error { code: ErrorCode; httpStatus: 400 | 500 }`
-`ErrorCode`: `MALFORMED_XDR`, `WRONG_NETWORK`, `UNSUPPORTED_FEE_BUMP`, `UNSUPPORTED_OPERATION`, `BAD_REQUESTER_SIGNATURE`, `MISSING_TIMEBOUND`, `TIMEBOUND_TOO_FAR`, `RULE_REJECTED`, `UNSAFE_TO_SIGN`, `UPSTREAM_UNAVAILABLE`, `INVALID_CONFIG`, `INTERNAL`.
+`ErrorCode`: `MALFORMED_XDR`, `UNSUPPORTED_FEE_BUMP`, `UNSUPPORTED_OPERATION`, `BAD_REQUESTER_SIGNATURE`, `MISSING_TIMEBOUND`, `TIMEBOUND_EXPIRED`, `TIMEBOUND_TOO_FAR`, `NO_TRUSTLINE`, `RULE_REJECTED`, `UNSAFE_TO_SIGN`, `UPSTREAM_UNAVAILABLE`, `INVALID_CONFIG`, `LOG_FAILURE`, `INTERNAL`.
 Unexpected exceptions become `INTERNAL` with a generic message. The real error goes to the log, never the response.
 
 ## 6. Amounts (src/stellar/amount.ts)
@@ -90,15 +90,15 @@ export interface RuleContext {
 }
 export interface Rule { id: string; evaluate(ctx: RuleContext): Promise<RuleResult> | RuleResult }
 ```
-**Aggregation [DESIGN]:** every rule runs and every result is recorded. The decision follows precedence reject, then action_required, then pending, then pass. Ties break by config order. Aggregation returns the winning result plus all individual results.
+**Aggregation [DESIGN]:** every rule runs and every result is recorded. The decision follows precedence reject, then action_required, then pending, then pass. Ties break by config order. Aggregation wraps every rule evaluation in a try/catch block so throwing rules fail closed with `{ outcome: "reject", code: "RULE_ERROR", message: "Rule evaluation failed" }`, forwarding the real error to an optional `onRuleError(ruleId, error)` handler. Aggregation returns the winning result plus all individual results.
 
 Built-in rules:
 - **per_tx_limit** `{max}`: reject (`PER_TX_LIMIT`) if any single payment amount exceeds `max`. Never alters amounts.
-- **holding_cap** `{max}`: for each destination, reject (`HOLDING_CAP`) if its current balance + reserved inflows from the store + the sum of payments to it in this transaction exceeds `max`.
-- **allowlist** `{path, onMiss?}`: CSV of G addresses, one per line, `#` comments and blank lines ignored; an invalid address is a load error. Every payment source and destination must be listed. On a miss: `reject` (`NOT_ALLOWLISTED`) by default, or `action_required` with the configured url, method and message when `onMiss` is set. The file is re-read when its modified time changes.
-- **denylist** `{path}`: same file format. Any listed source or destination rejects (`DENYLISTED`).
+- **holding_cap** `{max}`: for each destination, reject (`HOLDING_CAP`) if its current balance + reserved inflows from the store (excluding `ctx.txHash`) + the sum of payments to it in this transaction exceeds `max`. If any destination is missing from `ctx.accounts`, reject (`ACCOUNT_STATE_MISSING`).
+- **allowlist** `{path, onMiss?}`: CSV of G addresses, one per line, `#` comments and blank lines ignored; an invalid address is a load error. Every payment source and destination must be listed. On a miss: `reject` (`NOT_ALLOWLISTED`) by default, or `action_required` with the configured url, method and message when `onMiss` is set. The file is validated at construction and re-checked on mtime/size change; refresh failures reject with `LIST_UNAVAILABLE`.
+- **denylist** `{path}`: same file format and validation semantics. Any listed source or destination rejects (`DENYLISTED`). Refresh failures reject with `LIST_UNAVAILABLE`.
 - **lockup** `{until, applyTo, exempt}`: if `nowMs` is before `until`, reject (`LOCKED_UP`) when a payment's source (and/or destination, per `applyTo`) is not in `exempt`. `applyTo` defaults to `["source"]`.
-- **review_threshold** `{above, timeoutMs, message, approvedTxHashesPath}`: if any payment amount exceeds `above` and `ctx.txHash` is not listed in the approved-hashes file (one hex hash per line, re-read on each evaluation), return `pending` with `timeoutMs` and `message`. Otherwise pass.
+- **review_threshold** `{above, timeoutMs, message, approvedTxHashesPath}`: if any payment amount exceeds `above` and `ctx.txHash` is not listed in the approved-hashes file (one hex hash per line matching `^[0-9a-f]{64}$`, validated at construction, re-checked on each evaluation), return `pending` with `timeoutMs` and `message`. Refresh failures reject with `LIST_UNAVAILABLE`. Otherwise pass.
 
 Rule registry: `buildRules(config): Rule[]` returns rules in config order.
 
@@ -110,7 +110,7 @@ export interface Reservation {
 }
 export interface StateStore {
   reserve(r: Reservation): Promise<void>;                    // idempotent on (txHash, account, direction)
-  sumReserved(account: string, direction: "in" | "out", nowMs: number): Promise<Stroops>; // excludes expired
+  sumReserved(account: string, direction: "in" | "out", nowMs: number, excludeTxHash?: string): Promise<Stroops>; // excludes expired and optionally excludeTxHash
   release(txHash: string): Promise<void>;
   purgeExpired(nowMs: number): Promise<number>;
 }
@@ -136,3 +136,12 @@ Authorize/deauthorize composer (record on testnet whether SetTrustLineFlags or A
 - Golden fixtures: `fixtures/rules/<rule>/*.json` with `{ name, ruleConfig, context, expected }`. One test file loads every fixture for a rule. Each rule needs at least: a pass case, each reject or non-pass outcome, and boundary values (exactly at the limit).
 - Property tests with fast-check for amounts and reservations.
 - `pnpm test` runs offline. Integration tests are opt-in and use testnet.
+
+## 16. Amendments (v0.1.1)
+- **Self-reservation double counting fix:** `StateStore.sumReserved` accepts an optional `excludeTxHash` parameter. `holding_cap` passes `ctx.txHash` so retries of the same transaction do not count against their own prior reservations.
+- **Fail closed on missing account state:** `holding_cap` rejects with code `ACCOUNT_STATE_MISSING` if any destination account state is absent from `ctx.accounts`, instead of treating it as zero.
+- **Fail-fast validation and fail-closed refresh for file-backed rules:** `allowlist`, `denylist`, and `review_threshold` validate their files at construction (`INVALID_CONFIG`). During evaluations, file mtime and size are checked. Any refresh failure fails closed with `LIST_UNAVAILABLE` rather than using stale lists. Approved transaction hashes must match `^[0-9a-f]{64}$` (case-insensitive, stored lowercase).
+- **Fail-closed rule aggregation:** Rule aggregation catches any uncaught exceptions thrown by a rule, recording a `{ outcome: "reject", code: "RULE_ERROR", message: "Rule evaluation failed" }` result and passing the underlying error to an optional `onRuleError(ruleId, error)` callback.
+- **Error code adjustments:** Removed `WRONG_NETWORK` from `ErrorCode` (network passphrase mismatches manifest during requester signature verification as `BAD_REQUESTER_SIGNATURE`). Added `TIMEBOUND_EXPIRED`, `NO_TRUSTLINE`, and `LOG_FAILURE`.
+- **Muxed account rejection:** Muxed addresses (`M...`) are rejected in v0.1 with `UNSUPPORTED_OPERATION`.
+- **Concurrency serialization:** The approval pipeline serializes check-and-reserve per account via a keyed mutex locked in sorted order.

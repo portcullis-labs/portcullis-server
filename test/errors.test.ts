@@ -21,16 +21,18 @@ describe("PortcullisError", () => {
   it("should support all defined error codes", () => {
     const codes: ErrorCode[] = [
       "MALFORMED_XDR",
-      "WRONG_NETWORK",
       "UNSUPPORTED_FEE_BUMP",
       "UNSUPPORTED_OPERATION",
       "BAD_REQUESTER_SIGNATURE",
       "MISSING_TIMEBOUND",
+      "TIMEBOUND_EXPIRED",
       "TIMEBOUND_TOO_FAR",
+      "NO_TRUSTLINE",
       "RULE_REJECTED",
       "UNSAFE_TO_SIGN",
       "UPSTREAM_UNAVAILABLE",
       "INVALID_CONFIG",
+      "LOG_FAILURE",
       "INTERNAL",
     ];
 
