@@ -19,8 +19,8 @@ describe("safe-to-sign guard golden fixtures", () => {
   const fixturesDir = join(process.cwd(), "fixtures/guard");
   const files = readdirSync(fixturesDir).filter((f) => f.endsWith(".json"));
 
-  it("should have at least 9 adversarial fixtures", () => {
-    expect(files.length).toBeGreaterThanOrEqual(9);
+  it("should have at least 17 adversarial and safe fixtures", () => {
+    expect(files.length).toBeGreaterThanOrEqual(17);
   });
 
   for (const file of files) {
