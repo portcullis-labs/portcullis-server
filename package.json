@@ -7,6 +7,7 @@
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "start": "node dist/server/index.js",
+    "check": "node dist/cli/check.js",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:integration": "PORTCULLIS_TESTNET=1 vitest run test/integration",
