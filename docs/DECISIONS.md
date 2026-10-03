@@ -39,7 +39,7 @@ This document records the foundational architectural, organizational, and techni
 - **Legal Disclaimer:** `portcullis-server` helps an issuer enforce its own configured business and transfer rules; it does not make any party legally compliant.
 
 ## 6. SEP-8 Specification Verification
-
+ 
 - **Source:** `ecosystem/sep-0008.md` in `stellar/stellar-protocol`.
 - **Checked Date:** 2026-10-02.
 - **Status:** `Active`.
@@ -47,3 +47,19 @@ This document records the foundational architectural, organizational, and techni
 - **Created Date:** `2018-08-22`.
 - **Last Updated Date:** `2022-02-21`.
 - **Differences Observed:** None. The specification metadata and content match previous verification (v1.7.4, Active, last updated 2022-02-21).
+
+## 7. Approval Pipeline & Security Decisions (Milestone 2)
+
+- **WRONG_NETWORK Correction:** A Stellar transaction envelope XDR does not encode its network passphrase. Therefore, network passphrase mismatches cannot be detected during initial XDR decoding; instead, a passphrase mismatch alters the transaction hash and manifests as a failed requester signature check (`BAD_REQUESTER_SIGNATURE`).
+- **Muxed Account Rejection:** Muxed addresses (`M...`) are explicitly rejected in v0.1 with `UNSUPPORTED_OPERATION` to avoid counterparty identification ambiguity and memo ID bypasses.
+- **Fee Rule & Per-Operation Bound:** The fee per operation is computed as `totalFee / originalOpCount`. If this per-operation fee exceeds `config.approval.maxFeePerOperationStroops`, the request is rejected with `UNSUPPORTED_OPERATION` to prevent fee inflation attacks.
+- **Transaction Shaping & Signing Order:**
+  - For `revised` transactions (naked payment to which Portcullis adds authorize/deauthorize operations), user signatures over the original transaction hash are invalidated by adding operations. Therefore, the revised transaction is returned with *only* the issuer signature (`revised: true`), allowing the user's wallet to sign upon receipt.
+  - For `success` transactions (already complete SEP-8 sandwich), the user's existing signatures are preserved and the issuer's signature is appended.
+- **Fail-Closed Strategy:**
+  - Horizon errors or timeouts fail closed and return HTTP 500 with `Compliance check temporarily unavailable. Try again.` without producing an unverified signature.
+  - Rule exceptions fail closed with `{ outcome: "reject", code: "RULE_ERROR" }`.
+  - Unwritable log files fail closed by throwing `LOG_FAILURE` to ensure decisions are never made without an audit trail.
+- **Account Lock Serialization:** Check-and-reserve operations are serialized using a keyed async mutex locked across all unique payment counterparties in lexicographical order, preventing race conditions (e.g. concurrent cap bypasses) and avoiding deadlocks on multi-operation transactions.
+- **Reservation Writing Invariants:** StateStore reservations are written *only* for `success` and `revised` outcomes with `expiresAtMs` set to the transaction upper timebound (`maxTime`). Requests resulting in `pending`, `action_required`, or `rejected` never hold quota reservations.
+
