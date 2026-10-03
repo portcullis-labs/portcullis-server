@@ -1,6 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Networks, type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  Asset,
+  Keypair,
+  Networks,
+  Operation,
+  type Transaction,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { PortcullisError } from "../../src/errors.js";
 import { assertSafeToSign, type GuardContext } from "../../src/pipeline/guard.js";
@@ -19,8 +26,8 @@ describe("safe-to-sign guard golden fixtures", () => {
   const fixturesDir = join(process.cwd(), "fixtures/guard");
   const files = readdirSync(fixturesDir).filter((f) => f.endsWith(".json"));
 
-  it("should have at least 17 adversarial and safe fixtures", () => {
-    expect(files.length).toBeGreaterThanOrEqual(17);
+  it("should have at least 23 adversarial and safe fixtures", () => {
+    expect(files.length).toBeGreaterThanOrEqual(23);
   });
 
   for (const file of files) {
@@ -82,5 +89,69 @@ describe("safe-to-sign guard golden fixtures", () => {
         maxOperations: 10,
       }),
     ).toThrow(PortcullisError);
+  });
+
+  it("verifies decoded XDR flag representations for set and clear", () => {
+    const issuerKp = Keypair.random();
+    const userKp = Keypair.random();
+    const asset = new Asset("USDC", issuerKp.publicKey());
+
+    function buildAndDecodeFlags(flags: {
+      authorized?: boolean;
+      authorizedToMaintainLiabilities?: boolean;
+      clawbackEnabled?: boolean;
+    }) {
+      const b = new TransactionBuilder(
+        { accountId: () => userKp.publicKey(), sequenceNumber: () => "100", incrementSequenceNumber: () => {} },
+        { fee: "100", networkPassphrase: Networks.TESTNET, timebounds: { minTime: 0, maxTime: 1000 } },
+      );
+      b.addOperation(
+        Operation.setTrustLineFlags({
+          trustor: userKp.publicKey(),
+          asset,
+          flags,
+          source: issuerKp.publicKey(),
+        }),
+      );
+      const decoded = TransactionBuilder.fromXDR(b.build().toXDR(), Networks.TESTNET);
+      return (decoded.operations[0] as { flags?: unknown }).flags;
+    }
+
+    // Exact authorize: only authorized is true, others undefined
+    expect(buildAndDecodeFlags({ authorized: true })).toEqual({
+      authorized: true,
+      authorizedToMaintainLiabilities: undefined,
+      clawbackEnabled: undefined,
+    });
+
+    // Authorize with clawbackEnabled cleared (false)
+    expect(buildAndDecodeFlags({ authorized: true, clawbackEnabled: false })).toEqual({
+      authorized: true,
+      authorizedToMaintainLiabilities: undefined,
+      clawbackEnabled: false,
+    });
+
+    // Authorize with authorizedToMaintainLiabilities cleared (false)
+    expect(
+      buildAndDecodeFlags({ authorized: true, authorizedToMaintainLiabilities: false }),
+    ).toEqual({
+      authorized: true,
+      authorizedToMaintainLiabilities: false,
+      clawbackEnabled: undefined,
+    });
+
+    // Exact deauthorize: only authorized is false, others undefined
+    expect(buildAndDecodeFlags({ authorized: false })).toEqual({
+      authorized: false,
+      authorizedToMaintainLiabilities: undefined,
+      clawbackEnabled: undefined,
+    });
+
+    // Deauthorize with clawbackEnabled cleared (false)
+    expect(buildAndDecodeFlags({ authorized: false, clawbackEnabled: false })).toEqual({
+      authorized: false,
+      authorizedToMaintainLiabilities: undefined,
+      clawbackEnabled: false,
+    });
   });
 });
