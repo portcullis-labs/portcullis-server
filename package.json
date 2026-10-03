@@ -6,12 +6,14 @@
   "type": "module",
   "packageManager": "pnpm@12.6.0",
   "scripts": {
+    "start": "node dist/server/index.js",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:integration": "PORTCULLIS_TESTNET=1 vitest run test/integration",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit"
   },
+
   "dependencies": {
     "@hono/node-server": "2.1.3",
     "@stellar/stellar-sdk": "17.2.1",
