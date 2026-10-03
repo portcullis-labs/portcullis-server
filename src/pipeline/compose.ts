@@ -52,11 +52,24 @@ function isAlreadySep8Shaped(
     if (op.trustor !== expectedAccount) return false;
 
     if (op.type === "setTrustLineFlags") {
+      const flagOp = op as OperationRecord & {
+        flags?: {
+          authorized?: boolean;
+          authorizedToMaintainLiabilities?: boolean;
+          clawbackEnabled?: boolean;
+        };
+      };
       if (op.asset?.getCode?.() !== assetCode || op.asset?.getIssuer?.() !== issuer) return false;
-      if (!op.flags?.authorized) return false;
+      if (
+        flagOp.flags?.authorized !== true ||
+        flagOp.flags?.authorizedToMaintainLiabilities !== undefined ||
+        flagOp.flags?.clawbackEnabled !== undefined
+      ) {
+        return false;
+      }
     } else if (op.type === "allowTrust") {
       if (op.assetCode !== assetCode) return false;
-      if (!op.authorize) return false;
+      if (op.authorize !== true && op.authorize !== 1) return false;
     } else {
       return false;
     }
@@ -84,11 +97,24 @@ function isAlreadySep8Shaped(
     if (op.trustor !== expectedAccount) return false;
 
     if (op.type === "setTrustLineFlags") {
+      const flagOp = op as OperationRecord & {
+        flags?: {
+          authorized?: boolean;
+          authorizedToMaintainLiabilities?: boolean;
+          clawbackEnabled?: boolean;
+        };
+      };
       if (op.asset?.getCode?.() !== assetCode || op.asset?.getIssuer?.() !== issuer) return false;
-      if (op.flags?.authorized) return false; // Must be false for deauthorize
+      if (
+        flagOp.flags?.authorized !== false ||
+        flagOp.flags?.authorizedToMaintainLiabilities !== undefined ||
+        flagOp.flags?.clawbackEnabled !== undefined
+      ) {
+        return false;
+      }
     } else if (op.type === "allowTrust") {
       if (op.assetCode !== assetCode) return false;
-      if (op.authorize) return false;
+      if (op.authorize !== false && op.authorize !== 0) return false;
     } else {
       return false;
     }

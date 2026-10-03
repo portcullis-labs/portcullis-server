@@ -697,4 +697,69 @@ describe("pipeline runner end-to-end", () => {
       expect(result.body.error).toContain("exceeds maxFeePerOperationStroops");
     }
   });
+
+  it("revises pre-built sandwich containing tampered clawback flag and never returns signed with cleared clawback", async () => {
+    const account = new Account(user1Kp.publicKey(), "1000");
+    const builder = new TransactionBuilder(account, {
+      fee: "300",
+      networkPassphrase: Networks.TESTNET,
+      timebounds: { minTime: 1000, maxTime: 1200 },
+    });
+    // Adversarial pre-built auth flag op attempting to clear clawback
+    builder.addOperation(
+      Operation.setTrustLineFlags({
+        trustor: user2Kp.publicKey(),
+        asset: stellarAsset,
+        flags: { authorized: true, clawbackEnabled: false },
+        source: issuerKp.publicKey(),
+      }),
+    );
+    builder.addOperation(
+      Operation.payment({
+        destination: user2Kp.publicKey(),
+        asset: stellarAsset,
+        amount: "50.0000000",
+      }),
+    );
+    builder.addOperation(
+      Operation.setTrustLineFlags({
+        trustor: user2Kp.publicKey(),
+        asset: stellarAsset,
+        flags: { authorized: false },
+        source: issuerKp.publicKey(),
+      }),
+    );
+    const tamperedTx = builder.build();
+    tamperedTx.sign(user1Kp);
+
+    const store = new MemoryStateStore();
+    const logger = new DecisionLogger({ path: testLogPath, includeXdr: false });
+
+    const result = await runApproval(
+      { tx: tamperedTx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer,
+        stateStore: store,
+        accountStateProvider,
+        decisionLogger: logger,
+        lockManager,
+      },
+    );
+
+    // Because it was tampered, isAlreadySep8Shaped was false. It recomposed clean ops and returned revised (200)
+    expect(result.httpStatus).toBe(200);
+    expect(result.body.status).toBe("revised");
+    if (result.body.status === "revised") {
+      const revisedTx = TransactionBuilder.fromXDR(result.body.tx, Networks.TESTNET);
+      for (const op of revisedTx.operations) {
+        if (op.type === "setTrustLineFlags") {
+          expect(op.flags.clawbackEnabled).toBeUndefined();
+          expect(op.flags.authorizedToMaintainLiabilities).toBeUndefined();
+        }
+      }
+    }
+  });
 });
+
