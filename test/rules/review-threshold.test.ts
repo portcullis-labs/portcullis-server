@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ReviewThresholdRuleConfig } from "../../src/config/schema.js";
@@ -23,6 +23,7 @@ interface GoldenFixture {
   };
   expected: {
     outcome: "pass" | "reject" | "pending" | "action_required";
+    code?: string;
     timeoutMs?: number;
     message?: string;
   };
@@ -73,17 +74,57 @@ describe("review_threshold golden fixtures", () => {
 describe("review_threshold unit tests", () => {
   const testDir = join(process.cwd(), "fixtures/rules/review_threshold");
 
-  it("throws PortcullisError when approved hashes file does not exist", () => {
+  it("throws PortcullisError when approved hashes file does not exist at construction", () => {
+    expect(
+      () =>
+        new ReviewThresholdRule({
+          id: "review_threshold",
+          above: "100.0000000",
+          timeoutMs: 60000,
+          message: "Needs review",
+          approvedTxHashesPath: "fixtures/rules/review_threshold/non_existent.txt",
+        }),
+    ).toThrow(PortcullisError);
+  });
+
+  it("throws PortcullisError when approved hashes file contains invalid hash format at construction", () => {
+    const badHashesPath = join(testDir, "bad_hashes.txt");
+    writeFileSync(badHashesPath, "not_a_valid_64_char_hex_hash\n");
+    try {
+      expect(
+        () =>
+          new ReviewThresholdRule({
+            id: "review_threshold",
+            above: "100.0000000",
+            timeoutMs: 60000,
+            message: "Needs review",
+            approvedTxHashesPath: badHashesPath,
+          }),
+      ).toThrow(PortcullisError);
+    } finally {
+      try {
+        unlinkSync(badHashesPath);
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  it("fails closed with LIST_UNAVAILABLE when file is deleted after load", () => {
+    const tempHashesPath = join(testDir, "temp_deleted_hashes.txt");
+    const validHash = "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0";
+
+    writeFileSync(tempHashesPath, `${validHash}\n`);
     const rule = new ReviewThresholdRule({
       id: "review_threshold",
       above: "100.0000000",
       timeoutMs: 60000,
-      message: "Needs review",
-      approvedTxHashesPath: "fixtures/rules/review_threshold/non_existent.txt",
+      message: "Manual review required",
+      approvedTxHashesPath: tempHashesPath,
     });
 
     const context: RuleContext = {
-      txHash: "tx1",
+      txHash: validHash,
       nowMs: Date.now(),
       store: new MemoryStateStore(),
       payments: [
@@ -100,10 +141,18 @@ describe("review_threshold unit tests", () => {
       accounts: new Map(),
     };
 
-    expect(() => rule.evaluate(context)).toThrow(PortcullisError);
+    expect(rule.evaluate(context).outcome).toBe("pass");
+
+    // Delete the file: evaluate again fails closed with LIST_UNAVAILABLE
+    unlinkSync(tempHashesPath);
+    const result = rule.evaluate(context);
+    expect(result.outcome).toBe("reject");
+    if (result.outcome === "reject") {
+      expect(result.code).toBe("LIST_UNAVAILABLE");
+    }
   });
 
-  it("re-reads approved hashes file on each evaluation", () => {
+  it("re-reads approved hashes file on each evaluation when modified", () => {
     const dynamicHashesPath = join(testDir, "dynamic_approved.txt");
     const targetTxHash = "feedbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
 
@@ -138,8 +187,10 @@ describe("review_threshold unit tests", () => {
       // Initially not approved -> pending
       expect(rule.evaluate(context).outcome).toBe("pending");
 
-      // Append txHash to approved hashes file
+      // Append txHash to approved hashes file and update mtime
       writeFileSync(dynamicHashesPath, `${targetTxHash}\n`);
+      const futureSec = Math.floor(Date.now() / 1000) + 10;
+      utimesSync(dynamicHashesPath, futureSec, futureSec);
 
       // Immediately re-evaluated -> pass
       expect(rule.evaluate(context).outcome).toBe("pass");

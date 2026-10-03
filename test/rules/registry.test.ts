@@ -10,6 +10,10 @@ import { buildRule, buildRules } from "../../src/rules/registry.js";
 import { ReviewThresholdRule } from "../../src/rules/review-threshold.js";
 
 describe("Rule Registry", () => {
+  const allowlistPath = "fixtures/rules/allowlist/test_allowlist.csv";
+  const denylistPath = "fixtures/rules/denylist/test_denylist.csv";
+  const reviewHashesPath = "fixtures/rules/review_threshold/test_approved_hashes.txt";
+
   const baseConfig: PortcullisConfig = {
     network: "testnet",
     asset: {
@@ -41,8 +45,8 @@ describe("Rule Registry", () => {
     rules: [
       { id: "per_tx_limit", max: "1000.0000000" },
       { id: "holding_cap", max: "50000.0000000" },
-      { id: "allowlist", path: "./allowlist.csv" },
-      { id: "denylist", path: "./denylist.csv" },
+      { id: "allowlist", path: allowlistPath },
+      { id: "denylist", path: denylistPath },
       {
         id: "lockup",
         until: "2027-01-01T00:00:00Z",
@@ -54,7 +58,7 @@ describe("Rule Registry", () => {
         above: "5000.0000000",
         timeoutMs: 60000,
         message: "Manual review required",
-        approvedTxHashesPath: "./approved-txs.txt",
+        approvedTxHashesPath: reviewHashesPath,
       },
     ],
   };
@@ -89,10 +93,10 @@ describe("Rule Registry", () => {
     const holdingCap = buildRule({ id: "holding_cap", max: "100.0000000" });
     expect(holdingCap).toBeInstanceOf(HoldingCapRule);
 
-    const allowlist = buildRule({ id: "allowlist", path: "test.csv" });
+    const allowlist = buildRule({ id: "allowlist", path: allowlistPath });
     expect(allowlist).toBeInstanceOf(AllowlistRule);
 
-    const denylist = buildRule({ id: "denylist", path: "test.csv" });
+    const denylist = buildRule({ id: "denylist", path: denylistPath });
     expect(denylist).toBeInstanceOf(DenylistRule);
 
     const lockup = buildRule({
@@ -108,7 +112,7 @@ describe("Rule Registry", () => {
       above: "10.0000000",
       timeoutMs: 1000,
       message: "Review",
-      approvedTxHashesPath: "hashes.txt",
+      approvedTxHashesPath: reviewHashesPath,
     });
     expect(reviewThreshold).toBeInstanceOf(ReviewThresholdRule);
   });

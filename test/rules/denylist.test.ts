@@ -69,44 +69,70 @@ describe("denylist golden fixtures", () => {
 describe("denylist unit tests", () => {
   const testDir = join(process.cwd(), "fixtures/rules/denylist");
 
-  it("throws PortcullisError on non-existent file", () => {
-    const rule = new DenylistRule({
-      id: "denylist",
-      path: "fixtures/rules/denylist/non_existent.csv",
-    });
-    const context: RuleContext = {
-      txHash: "tx1",
-      nowMs: Date.now(),
-      store: new MemoryStateStore(),
-      payments: [],
-      accounts: new Map(),
-    };
-
-    expect(() => rule.evaluate(context)).toThrow(PortcullisError);
+  it("throws PortcullisError on non-existent file at construction", () => {
+    expect(
+      () =>
+        new DenylistRule({
+          id: "denylist",
+          path: "fixtures/rules/denylist/non_existent.csv",
+        }),
+    ).toThrow(PortcullisError);
   });
 
-  it("throws PortcullisError when CSV contains invalid Stellar address", () => {
+  it("throws PortcullisError when CSV contains invalid Stellar address at construction", () => {
     const badCsvPath = join(testDir, "bad_denylist.csv");
     writeFileSync(badCsvPath, "NOT_A_VALID_STELLAR_ADDRESS\n");
     try {
-      const rule = new DenylistRule({
-        id: "denylist",
-        path: badCsvPath,
-      });
-      const context: RuleContext = {
-        txHash: "tx1",
-        nowMs: Date.now(),
-        store: new MemoryStateStore(),
-        payments: [],
-        accounts: new Map(),
-      };
-      expect(() => rule.evaluate(context)).toThrow(PortcullisError);
+      expect(
+        () =>
+          new DenylistRule({
+            id: "denylist",
+            path: badCsvPath,
+          }),
+      ).toThrow(PortcullisError);
     } finally {
       try {
         unlinkSync(badCsvPath);
       } catch {
         // ignore
       }
+    }
+  });
+
+  it("fails closed with LIST_UNAVAILABLE when file is deleted after load", () => {
+    const tempCsvPath = join(testDir, "temp_deleted_denylist.csv");
+    const addr1 = "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW";
+    const addr2 = "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX";
+
+    writeFileSync(tempCsvPath, `${addr1}\n`);
+    const rule = new DenylistRule({
+      id: "denylist",
+      path: tempCsvPath,
+    });
+
+    const context: RuleContext = {
+      txHash: "tx1",
+      nowMs: Date.now(),
+      store: new MemoryStateStore(),
+      payments: [
+        {
+          from: addr2,
+          to: "GABPCMNFU3WWSY2G457BK6FS2QMABCA2MUOLQ7J23VVVWALI6EXUXUXR",
+          asset: { code: "GOAT", issuer: addr1 },
+          amount: 100n,
+        },
+      ],
+      accounts: new Map(),
+    };
+
+    expect(rule.evaluate(context).outcome).toBe("pass");
+
+    // Delete the file and evaluate again: fails closed with LIST_UNAVAILABLE
+    unlinkSync(tempCsvPath);
+    const result = rule.evaluate(context);
+    expect(result.outcome).toBe("reject");
+    if (result.outcome === "reject") {
+      expect(result.code).toBe("LIST_UNAVAILABLE");
     }
   });
 

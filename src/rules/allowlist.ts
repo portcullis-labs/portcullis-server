@@ -8,26 +8,44 @@ import type { Rule, RuleContext, RuleResult } from "./types.js";
 export class AllowlistRule implements Rule {
   readonly id = "allowlist";
   private lastMtimeMs: number | null = null;
+  private lastSize: number | null = null;
   private cachedAddresses: Set<string> = new Set();
 
-  constructor(readonly config: AllowlistRuleConfig) {}
+  constructor(readonly config: AllowlistRuleConfig) {
+    this.cachedAddresses = this.readAndParse(true);
+  }
 
-  private getAllowlistedAddresses(): Set<string> {
+  private readAndParse(isInitial: boolean): Set<string> {
     let stat: Stats;
     try {
       stat = statSync(this.config.path);
     } catch (err) {
-      throw new PortcullisError(
-        "INVALID_CONFIG",
-        `Failed to read allowlist file at ${this.config.path}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      if (isInitial) {
+        throw new PortcullisError(
+          "INVALID_CONFIG",
+          `Failed to read allowlist file at ${this.config.path}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      throw err;
     }
 
-    if (this.lastMtimeMs === stat.mtimeMs) {
+    if (!isInitial && this.lastMtimeMs === stat.mtimeMs && this.lastSize === stat.size) {
       return this.cachedAddresses;
     }
 
-    const content = readFileSync(this.config.path, "utf-8");
+    let content: string;
+    try {
+      content = readFileSync(this.config.path, "utf-8");
+    } catch (err) {
+      if (isInitial) {
+        throw new PortcullisError(
+          "INVALID_CONFIG",
+          `Failed to read allowlist file at ${this.config.path}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      throw err;
+    }
+
     const lines = content.split(/\r?\n/);
     const addresses = new Set<string>();
 
@@ -39,21 +57,44 @@ export class AllowlistRule implements Rule {
         continue;
       }
       if (!StrKey.isValidEd25519PublicKey(line)) {
-        throw new PortcullisError(
-          "INVALID_CONFIG",
-          `Invalid Stellar address in allowlist file at line ${i + 1}: "${line}"`,
-        );
+        if (isInitial) {
+          throw new PortcullisError(
+            "INVALID_CONFIG",
+            `Invalid Stellar address in allowlist file at line ${i + 1}: "${line}"`,
+          );
+        }
+        throw new Error(`Invalid Stellar address in allowlist file at line ${i + 1}: "${line}"`);
       }
       addresses.add(line);
     }
 
     this.lastMtimeMs = stat.mtimeMs;
+    this.lastSize = stat.size;
     this.cachedAddresses = addresses;
-    return this.cachedAddresses;
+    return addresses;
+  }
+
+  private getAllowlistedAddresses(): Set<string> | null {
+    try {
+      return this.readAndParse(false);
+    } catch {
+      // Invalidate cache on refresh error so stale data is never used
+      this.lastMtimeMs = null;
+      this.lastSize = null;
+      this.cachedAddresses = new Set();
+      return null;
+    }
   }
 
   evaluate(ctx: RuleContext): RuleResult {
     const allowlisted = this.getAllowlistedAddresses();
+    if (!allowlisted) {
+      return {
+        outcome: "reject",
+        code: "LIST_UNAVAILABLE",
+        message: `Allowlist file at ${this.config.path} is unavailable or invalid`,
+      };
+    }
 
     for (const payment of ctx.payments) {
       const accountsToCheck = [payment.from, payment.to];

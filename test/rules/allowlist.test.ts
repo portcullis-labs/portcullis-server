@@ -77,48 +77,27 @@ describe("allowlist golden fixtures", () => {
 describe("allowlist unit tests", () => {
   const testDir = join(process.cwd(), "fixtures/rules/allowlist");
 
-  it("throws PortcullisError on non-existent file", () => {
-    const rule = new AllowlistRule({
-      id: "allowlist",
-      path: "fixtures/rules/allowlist/non_existent.csv",
-    });
-    const context: RuleContext = {
-      txHash: "tx1",
-      nowMs: Date.now(),
-      store: new MemoryStateStore(),
-      payments: [
-        {
-          from: "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
-          to: "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX",
-          asset: {
-            code: "GOAT",
-            issuer: "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW",
-          },
-          amount: 100n,
-        },
-      ],
-      accounts: new Map(),
-    };
-
-    expect(() => rule.evaluate(context)).toThrow(PortcullisError);
+  it("throws PortcullisError on non-existent file at construction", () => {
+    expect(
+      () =>
+        new AllowlistRule({
+          id: "allowlist",
+          path: "fixtures/rules/allowlist/non_existent.csv",
+        }),
+    ).toThrow(PortcullisError);
   });
 
-  it("throws PortcullisError when CSV contains invalid Stellar address", () => {
+  it("throws PortcullisError when CSV contains invalid Stellar address at construction", () => {
     const badCsvPath = join(testDir, "bad_address.csv");
     writeFileSync(badCsvPath, "NOT_A_VALID_STELLAR_ADDRESS\n");
     try {
-      const rule = new AllowlistRule({
-        id: "allowlist",
-        path: badCsvPath,
-      });
-      const context: RuleContext = {
-        txHash: "tx1",
-        nowMs: Date.now(),
-        store: new MemoryStateStore(),
-        payments: [],
-        accounts: new Map(),
-      };
-      expect(() => rule.evaluate(context)).toThrow(PortcullisError);
+      expect(
+        () =>
+          new AllowlistRule({
+            id: "allowlist",
+            path: badCsvPath,
+          }),
+      ).toThrow(PortcullisError);
     } finally {
       try {
         unlinkSync(badCsvPath);
@@ -128,7 +107,44 @@ describe("allowlist unit tests", () => {
     }
   });
 
-  it("re-reads CSV file when mtime changes", () => {
+  it("fails closed with LIST_UNAVAILABLE when file is deleted after load", () => {
+    const tempCsvPath = join(testDir, "temp_deleted.csv");
+    const addr1 = "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW";
+    const addr2 = "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX";
+
+    writeFileSync(tempCsvPath, `${addr1}\n${addr2}\n`);
+    const rule = new AllowlistRule({
+      id: "allowlist",
+      path: tempCsvPath,
+    });
+
+    const context: RuleContext = {
+      txHash: "tx1",
+      nowMs: Date.now(),
+      store: new MemoryStateStore(),
+      payments: [
+        {
+          from: addr1,
+          to: addr2,
+          asset: { code: "GOAT", issuer: addr1 },
+          amount: 100n,
+        },
+      ],
+      accounts: new Map(),
+    };
+
+    expect(rule.evaluate(context).outcome).toBe("pass");
+
+    // Delete the file and evaluate again: fails closed with LIST_UNAVAILABLE
+    unlinkSync(tempCsvPath);
+    const result = rule.evaluate(context);
+    expect(result.outcome).toBe("reject");
+    if (result.outcome === "reject") {
+      expect(result.code).toBe("LIST_UNAVAILABLE");
+    }
+  });
+
+  it("re-reads CSV file when mtime or size changes", () => {
     const dynamicCsvPath = join(testDir, "dynamic.csv");
     const addr1 = "GA7DACFRQUIDE2L3NPC6G43W2Y5UT33IRCVY5MQLN7XG7G6ZRPSXNLCW";
     const addr2 = "GBTVKLRH6EXASHIPVZGT6Z7CIHHECPTNOCULT6DNMUH6NIPG7K2W5GRX";
