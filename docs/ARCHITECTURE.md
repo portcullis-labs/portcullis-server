@@ -7,14 +7,18 @@ This document describes the architectural layout, module structure, and pipeline
 ```
 portcullis-server/
 ├── src/
+│   ├── cli/            # Standalone CLI tools (dry-run check command)
+│   │   └── check.ts    # check CLI implementation
 │   ├── config/         # PortcullisConfig schema (Zod) and YAML parser/loader
-│   │   ├── schema.ts   # Configuration Zod schemas and PortcullisConfig type
-│   │   └── loader.ts   # YAML file loader with validation and env secret resolution
+│   │   ├── issuer-check.ts # Horizon issuer flags verification at startup
+│   │   ├── loader.ts   # YAML file loader with validation
+│   │   └── schema.ts   # Configuration Zod schemas and PortcullisConfig type
 │   ├── domain/         # Core domain types (AssetId, Amount, AccountState, Stroops)
 │   │   └── types.ts    # Common domain types, PaymentOperation, Stroops brand
 │   ├── errors.ts       # PortcullisError class and ErrorCode definitions
-│   ├── log/            # Structured JSON-lines audit logging
-│   │   └── logger.ts   # DecisionLogger and DecisionLogEntry interfaces
+│   ├── log/            # Structured JSON-lines audit logging & stderr logging
+│   │   ├── logger.ts   # DecisionLogger and DecisionLogEntry interfaces
+│   │   └── stderr.ts   # Formatted process.stderr logger
 │   ├── pipeline/       # Core SEP-8 approval pipeline
 │   │   ├── classify.ts # Operation classifier (payments vs flag operations)
 │   │   ├── compose.ts  # SEP-8 sandwich composer (authorize + payment + deauthorize)
@@ -35,6 +39,14 @@ portcullis-server/
 │   │   ├── registry.ts  # Rule registry constructor from PortcullisConfig
 │   │   ├── review-threshold.ts # Review threshold rule (pending on large transfers)
 │   │   └── types.ts     # Rule, RuleContext, and RuleResult interfaces
+│   ├── server/         # Hono HTTP server & route handlers
+│   │   ├── app.ts      # Server application factory and CORS middleware
+│   │   ├── index.ts    # Main server entry point & CLI runner
+│   │   ├── parse-request.ts # Request body parser with 64KB size bounds
+│   │   └── routes/
+│   │       ├── health.ts       # GET /health liveness probe
+│   │       ├── stellar-toml.ts # GET /.well-known/stellar.toml
+│   │       └── tx-approve.ts   # POST /tx_approve SEP-8 approval endpoint
 │   ├── signer/         # Cryptographic signing abstraction
 │   │   ├── local.ts    # LocalSigner implementation with Keypair
 │   │   └── types.ts    # IssuerSigner interface
@@ -49,9 +61,13 @@ portcullis-server/
 │   ├── guard/          # Adversarial guard fixtures expecting UNSAFE_TO_SIGN
 │   └── rules/          # Rule fixtures (allowlists, denylists, review hashes)
 ├── test/               # Comprehensive offline unit, property, and integration tests
+│   ├── cli/            # CLI dry-run check unit tests
+│   ├── config/         # Config and startup issuer check tests
 │   ├── integration/    # Opt-in live testnet round-trip test suite
+│   ├── log/            # Decision logger unit tests
 │   ├── pipeline/       # Pipeline unit and end-to-end runner test suites
 │   ├── rules/          # Unit tests for each rule evaluator
+│   ├── server/         # HTTP server, CORS, route, and parsing tests
 │   ├── signer/         # Local signer tests
 │   ├── state/          # State store and concurrency tests
 │   ├── stellar/        # Account state and stroops amount tests
@@ -63,6 +79,7 @@ portcullis-server/
     ├── QUALITY_BAR.md  # Engineering quality standards and quality bar
     ├── SPEC.md         # Full Portcullis SEP-8 server specification
     └── THREAT_MODEL.md # Security threat model and risk mitigations
+
 ```
 
 ## System Architecture & Pipeline Flow
