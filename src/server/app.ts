@@ -15,5 +15,17 @@ export function createServerApp() {
     c.header("Access-Control-Allow-Origin", "*");
   });
 
+  // Not Found handler: returns 404 JSON with CORS
+  app.notFound((c) => {
+    c.header("Access-Control-Allow-Origin", "*");
+    return c.json({ error: "Not Found" }, 404);
+  });
+
+  // Error handler: returns 500 JSON with CORS
+  app.onError((_err, c) => {
+    c.header("Access-Control-Allow-Origin", "*");
+    return c.json({ status: "rejected", error: "Request could not be processed." }, 500);
+  });
+
   return app;
 }
