@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { ApprovalDependencies } from "../pipeline/runner.js";
+import { handleHealth } from "./routes/health.js";
 import { handleTxApprove } from "./routes/tx-approve.js";
 
 export function createServerApp(deps?: ApprovalDependencies) {
@@ -20,6 +21,8 @@ export function createServerApp(deps?: ApprovalDependencies) {
   if (deps) {
     app.post("/tx_approve", (c) => handleTxApprove(c, deps));
   }
+
+  app.get("/health", (c) => handleHealth(c));
 
   // Not Found handler: returns 404 JSON with CORS
   app.notFound((c) => {
