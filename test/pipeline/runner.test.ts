@@ -230,9 +230,9 @@ describe("pipeline runner end-to-end", () => {
 
     expect(result.httpStatus).toBe(400);
     expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
     if (result.body.status === "rejected") {
-      expect(result.body.error).toBeDefined();
-      expect(result.body.code).toBe("PER_TX_LIMIT");
+      expect(result.body.error).toContain("exceeds limit");
     }
 
     // Ensure no reservation was written
@@ -347,8 +347,9 @@ describe("pipeline runner end-to-end", () => {
 
     expect(result.httpStatus).toBe(400);
     expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
     if (result.body.status === "rejected") {
-      expect(result.body.code).toBe("BAD_REQUESTER_SIGNATURE");
+      expect(result.body.error).toContain("Transaction lacks a valid signature");
     }
   });
 
@@ -371,12 +372,13 @@ describe("pipeline runner end-to-end", () => {
 
     expect(result.httpStatus).toBe(400);
     expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
     if (result.body.status === "rejected") {
-      expect(result.body.code).toBe("TIMEBOUND_EXPIRED");
+      expect(result.body.error).toContain("Transaction timebound has expired");
     }
   });
 
-  it("fails closed returning rejected (500) when Horizon account provider throws", async () => {
+  it("returns rejected (400) when Horizon account provider throws (upstream failure) without signing", async () => {
     const tx = buildPaymentTx(user1Kp, user2Kp.publicKey(), "50.0000000");
     const store = new MemoryStateStore();
     const logger = new DecisionLogger({ path: testLogPath, includeXdr: false });
@@ -398,10 +400,53 @@ describe("pipeline runner end-to-end", () => {
       },
     );
 
-    expect(result.httpStatus).toBe(500);
+    expect(result.httpStatus).toBe(400);
     expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
     if (result.body.status === "rejected") {
       expect(result.body.error).toBe("Compliance check temporarily unavailable. Try again.");
     }
+  });
+
+  it("sanitizes internal errors returning generic 500 without leaking secrets", async () => {
+    const tx = buildPaymentTx(user1Kp, user2Kp.publicKey(), "50.0000000");
+    const store = new MemoryStateStore();
+    const logger = new DecisionLogger({ path: testLogPath, includeXdr: false });
+
+    const throwingSigner = {
+      publicKey: () => issuerKp.publicKey(),
+      signTransaction: async () => {
+        throw new Error("Signer internal failure: TEST_SECRET_VALUE_123");
+      },
+    };
+
+    let reportedInternalError: unknown = null;
+
+    const result = await runApproval(
+      { tx: tx.toXDR(), nowMs: 1050 * 1000 },
+      {
+        config,
+        rules: [],
+        signer: throwingSigner,
+        stateStore: store,
+        accountStateProvider,
+        decisionLogger: logger,
+        onInternalError: (err) => {
+          reportedInternalError = err;
+        },
+      },
+    );
+
+    expect(result.httpStatus).toBe(500);
+    expect(result.body.status).toBe("rejected");
+    expect(result.body).not.toHaveProperty("code");
+    if (result.body.status === "rejected") {
+      expect(result.body.error).toBe("Request could not be processed.");
+      expect(result.body.error).not.toContain("TEST_SECRET_VALUE_123");
+    }
+
+    // onInternalError received the real underlying error
+    expect(reportedInternalError).toBeInstanceOf(Error);
+    expect((reportedInternalError as Error).message).toContain("TEST_SECRET_VALUE_123");
   });
 });

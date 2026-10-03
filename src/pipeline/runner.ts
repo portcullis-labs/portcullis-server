@@ -50,7 +50,6 @@ export type ApprovalResponse =
   | {
       status: "rejected";
       error: string;
-      code?: string;
     };
 
 export interface ApprovalDependencies {
@@ -61,6 +60,7 @@ export interface ApprovalDependencies {
   accountStateProvider: AccountStateProvider;
   decisionLogger: DecisionLogger;
   lockManager?: AccountLockManager;
+  onInternalError?: (error: unknown) => void;
 }
 
 export interface RunApprovalResult {
@@ -132,20 +132,24 @@ export async function runApproval(
           );
         } catch {
           const durationMs = Date.now() - startTime;
-          deps.decisionLogger.log({
-            timestamp: new Date().toISOString(),
-            requestId,
-            txHash,
-            source: txSource,
-            outcome: "rejected",
-            rules: [],
-            errorCode: "UPSTREAM_UNAVAILABLE",
-            durationMs,
-            xdr: request.tx,
-          });
+          try {
+            deps.decisionLogger.log({
+              timestamp: new Date().toISOString(),
+              requestId,
+              txHash,
+              source: txSource,
+              outcome: "rejected",
+              rules: [],
+              errorCode: "UPSTREAM_UNAVAILABLE",
+              durationMs,
+              xdr: request.tx,
+            });
+          } catch {
+            // ignore logging error on upstream rejection
+          }
 
           return {
-            httpStatus: 500,
+            httpStatus: 400,
             body: {
               status: "rejected",
               error: "Compliance check temporarily unavailable. Try again.",
@@ -181,45 +185,48 @@ export async function runApproval(
         if (agg.winningResult.outcome === "reject") {
           const { code, message } = agg.winningResult;
           const durationMs = Date.now() - startTime;
-          deps.decisionLogger.log({
-            timestamp: new Date().toISOString(),
-            requestId,
-            txHash,
-            source: txSource,
-            outcome: "rejected",
-            rules: ruleLogs,
-            errorCode: code,
-            durationMs,
-            xdr: request.tx,
-          });
-
-          const body: ApprovalResponse = {
-            status: "rejected",
-            error: message,
-          };
-          if (code) {
-            body.code = code;
+          try {
+            deps.decisionLogger.log({
+              timestamp: new Date().toISOString(),
+              requestId,
+              txHash,
+              source: txSource,
+              outcome: "rejected",
+              rules: ruleLogs,
+              errorCode: code,
+              durationMs,
+              xdr: request.tx,
+            });
+          } catch {
+            // ignore log error
           }
 
           return {
             httpStatus: 400,
-            body,
+            body: {
+              status: "rejected",
+              error: message,
+            },
           };
         }
 
         if (agg.winningResult.outcome === "pending") {
           const { timeoutMs, message } = agg.winningResult;
           const durationMs = Date.now() - startTime;
-          deps.decisionLogger.log({
-            timestamp: new Date().toISOString(),
-            requestId,
-            txHash,
-            source: txSource,
-            outcome: "pending",
-            rules: ruleLogs,
-            durationMs,
-            xdr: request.tx,
-          });
+          try {
+            deps.decisionLogger.log({
+              timestamp: new Date().toISOString(),
+              requestId,
+              txHash,
+              source: txSource,
+              outcome: "pending",
+              rules: ruleLogs,
+              durationMs,
+              xdr: request.tx,
+            });
+          } catch {
+            // ignore log error
+          }
 
           const body: ApprovalResponse = {
             status: "pending",
@@ -238,16 +245,20 @@ export async function runApproval(
         if (agg.winningResult.outcome === "action_required") {
           const { message, actionUrl, actionMethod, actionFields } = agg.winningResult;
           const durationMs = Date.now() - startTime;
-          deps.decisionLogger.log({
-            timestamp: new Date().toISOString(),
-            requestId,
-            txHash,
-            source: txSource,
-            outcome: "action_required",
-            rules: ruleLogs,
-            durationMs,
-            xdr: request.tx,
-          });
+          try {
+            deps.decisionLogger.log({
+              timestamp: new Date().toISOString(),
+              requestId,
+              txHash,
+              source: txSource,
+              outcome: "action_required",
+              rules: ruleLogs,
+              durationMs,
+              xdr: request.tx,
+            });
+          } catch {
+            // ignore log error
+          }
 
           const body: ApprovalResponse = {
             status: "action_required",
@@ -309,16 +320,20 @@ export async function runApproval(
         const durationMs = Date.now() - startTime;
         const outcome = composeResult.revised ? "revised" : "success";
 
-        deps.decisionLogger.log({
-          timestamp: new Date().toISOString(),
-          requestId,
-          txHash,
-          source: txSource,
-          outcome,
-          rules: ruleLogs,
-          durationMs,
-          xdr: request.tx,
-        });
+        try {
+          deps.decisionLogger.log({
+            timestamp: new Date().toISOString(),
+            requestId,
+            txHash,
+            source: txSource,
+            outcome,
+            rules: ruleLogs,
+            durationMs,
+            xdr: request.tx,
+          });
+        } catch {
+          // ignore
+        }
 
         const body: ApprovalResponse = composeResult.revised
           ? {
@@ -346,33 +361,63 @@ export async function runApproval(
       const isInternal =
         err.code === "LOG_FAILURE" ||
         err.code === "INVALID_CONFIG" ||
-        err.code === "UNSAFE_TO_SIGN" ||
-        err.code === "UPSTREAM_UNAVAILABLE";
-      const httpStatus = isInternal ? 500 : 400;
+        err.code === "UNSAFE_TO_SIGN";
 
-      deps.decisionLogger.log({
-        timestamp: new Date().toISOString(),
-        requestId,
-        txHash,
-        source: txSource,
-        outcome: "rejected",
-        rules: ruleLogs,
-        errorCode: err.code,
-        durationMs,
-        xdr: request.tx,
-      });
+      if (isInternal) {
+        deps.onInternalError?.(err);
+        try {
+          deps.decisionLogger.log({
+            timestamp: new Date().toISOString(),
+            requestId,
+            txHash,
+            source: txSource,
+            outcome: "rejected",
+            rules: ruleLogs,
+            errorCode: err.code,
+            durationMs,
+            xdr: request.tx,
+          });
+        } catch (logErr) {
+          deps.onInternalError?.(logErr);
+        }
+
+        return {
+          httpStatus: 500,
+          body: {
+            status: "rejected",
+            error: "Request could not be processed.",
+          },
+        };
+      }
+
+      // Ordinary client-visible rejection
+      try {
+        deps.decisionLogger.log({
+          timestamp: new Date().toISOString(),
+          requestId,
+          txHash,
+          source: txSource,
+          outcome: "rejected",
+          rules: ruleLogs,
+          errorCode: err.code,
+          durationMs,
+          xdr: request.tx,
+        });
+      } catch {
+        // ignore log error
+      }
 
       return {
-        httpStatus,
+        httpStatus: 400,
         body: {
           status: "rejected",
           error: err.message,
-          code: err.code,
         },
       };
     }
 
-    const message = err instanceof Error ? err.message : String(err);
+    // Unexpected runtime exception
+    deps.onInternalError?.(err);
     try {
       deps.decisionLogger.log({
         timestamp: new Date().toISOString(),
@@ -385,15 +430,15 @@ export async function runApproval(
         durationMs,
         xdr: request.tx,
       });
-    } catch {
-      // ignore secondary log error
+    } catch (logErr) {
+      deps.onInternalError?.(logErr);
     }
 
     return {
       httpStatus: 500,
       body: {
         status: "rejected",
-        error: message,
+        error: "Request could not be processed.",
       },
     };
   }
